@@ -1,0 +1,22 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Production {
+  id             String   @id @default(cuid())
+  brickType      String   // e.g. "4 inch", "6 inch", "Solid"
+  quantity       Int
+  productionDate DateTime
+  goodDate       DateTime // productionDate + 13 days
+  notes          String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([productionDate])
+  @@index([brickType])
+}
