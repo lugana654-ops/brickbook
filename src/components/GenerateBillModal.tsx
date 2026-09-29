@@ -260,65 +260,71 @@ export default function GenerateBillModal({
             </p>
           </div>
         ) : (
-          <div className="bg-slate-50/90 rounded-2xl p-3.5 border border-slate-200 flex flex-col gap-2 text-xs font-sans shadow-xs">
+          <div className="bg-slate-50/90 rounded-2xl p-3.5 border border-slate-200 flex flex-col gap-2.5 text-xs font-sans shadow-xs">
             {/* Table Header */}
-            <div className="grid grid-cols-12 text-[10px] font-extrabold text-slate-500 uppercase tracking-wider border-b border-slate-200 pb-1.5">
-              <div className="col-span-5">Item Description</div>
-              <div className="col-span-3 text-right">Quantity</div>
-              <div className="col-span-2 text-right">Rate</div>
-              <div className="col-span-2 text-right">Amount</div>
+            <div className="grid grid-cols-12 text-[10px] font-extrabold text-slate-500 uppercase tracking-wider border-b border-slate-200 pb-2">
+              <div className="col-span-4 text-left">ITEM</div>
+              <div className="col-span-3 text-right">QTY</div>
+              <div className="col-span-2 text-right">RATE</div>
+              <div className="col-span-3 text-right">AMOUNT</div>
             </div>
 
             {/* Rows */}
             {total4Inch > 0 && (
-              <div className="grid grid-cols-12 text-xs text-slate-700 items-center py-0.5">
-                <div className="col-span-5 font-bold text-slate-800">4" Concrete Bricks</div>
+              <div className="grid grid-cols-12 text-xs text-slate-700 items-center py-1">
+                <div className="col-span-4 font-bold text-slate-800 truncate pr-1">4" Bricks</div>
                 <div className="col-span-3 text-right font-medium text-slate-600">{total4Inch.toLocaleString("en-IN")} pcs</div>
                 <div className="col-span-2 text-right text-[11px] font-medium text-slate-500">
                   {rateStr4Inch}
                 </div>
-                <div className="col-span-2 text-right font-extrabold text-[#213547]">
+                <div className="col-span-3 text-right font-extrabold text-[#213547]">
                   Rs. {gross4Inch.toLocaleString("en-IN")}
                 </div>
               </div>
             )}
 
             {total6Inch > 0 && (
-              <div className="grid grid-cols-12 text-xs text-slate-700 items-center py-0.5">
-                <div className="col-span-5 font-bold text-slate-800">6" Concrete Bricks</div>
+              <div className="grid grid-cols-12 text-xs text-slate-700 items-center py-1">
+                <div className="col-span-4 font-bold text-slate-800 truncate pr-1">6" Bricks</div>
                 <div className="col-span-3 text-right font-medium text-slate-600">{total6Inch.toLocaleString("en-IN")} pcs</div>
                 <div className="col-span-2 text-right text-[11px] font-medium text-slate-500">
                   {rateStr6Inch}
                 </div>
-                <div className="col-span-2 text-right font-extrabold text-[#213547]">
+                <div className="col-span-3 text-right font-extrabold text-[#213547]">
                   Rs. {gross6Inch.toLocaleString("en-IN")}
                 </div>
               </div>
             )}
 
-            {/* Divider */}
-            <div className="border-t border-slate-200 pt-2 mt-0.5 flex flex-col gap-1">
-              <div className="flex justify-between items-center text-xs">
-                <span className="font-bold text-slate-700">Total Bricks: <span className="font-extrabold text-[#213547]">{totalBricks.toLocaleString("en-IN")} pcs</span></span>
-                <span className="font-bold text-slate-800">Gross Bill: <span className="font-black text-[#213547]">Rs. {grossBill.toLocaleString("en-IN")}</span></span>
+            {/* Total Bricks Row with Divider */}
+            <div className="border-t border-slate-200 pt-2 flex justify-between items-center text-xs">
+              <span className="font-semibold text-slate-600">Total Bricks</span>
+              <span className="font-bold text-slate-900">{totalBricks.toLocaleString("en-IN")} pcs</span>
+            </div>
+
+            {/* Financial Summary */}
+            <div className="border-t border-slate-200 pt-2 flex flex-col gap-1.5 text-xs">
+              <div className="flex justify-between items-center">
+                <span className="font-semibold text-slate-600">Gross Bill</span>
+                <span className="font-extrabold text-slate-900">Rs. {grossBill.toLocaleString("en-IN")}</span>
               </div>
 
-              <div className="flex justify-between items-center text-xs font-medium text-slate-600">
-                <span></span>
-                <span>Total Paid: <span className="font-bold text-emerald-700">- Rs. {totalPaidReceived.toLocaleString("en-IN")}</span></span>
+              <div className="flex justify-between items-center">
+                <span className="font-semibold text-slate-600">Total Paid</span>
+                <span className="font-bold text-emerald-600">- Rs. {totalPaidReceived.toLocaleString("en-IN")}</span>
               </div>
 
               {totalDiscounts > 0 && (
-                <div className="flex justify-between items-center text-xs font-medium text-slate-600">
-                  <span></span>
-                  <span>Discount: <span className="font-bold text-emerald-700">- Rs. {totalDiscounts.toLocaleString("en-IN")}</span></span>
+                <div className="flex justify-between items-center">
+                  <span className="font-semibold text-slate-600">Discount</span>
+                  <span className="font-bold text-emerald-600">- Rs. {totalDiscounts.toLocaleString("en-IN")}</span>
                 </div>
               )}
             </div>
 
             {/* NET BALANCE DUE HIGHLIGHT */}
-            <div className="bg-[#d97706] text-white rounded-xl p-2.5 flex justify-between items-center font-extrabold text-xs shadow-xs mt-1">
-              <span>NET BALANCE DUE:</span>
+            <div className="bg-[#d97706] text-white rounded-2xl p-3.5 flex justify-between items-center font-extrabold text-xs shadow-sm mt-1">
+              <span className="tracking-wide">NET BALANCE DUE</span>
               <span className="text-sm font-black">
                 Rs. {Math.abs(netBalanceDue).toLocaleString("en-IN")}{netBalanceDue < 0 && " (Credit)"}
               </span>
@@ -327,20 +333,20 @@ export default function GenerateBillModal({
         )}
 
         {/* 3. Action Buttons */}
-        <div className="flex flex-col gap-2 mt-1">
+        <div className="flex flex-col gap-2.5 mt-1">
           <button
             onClick={handleDownloadPDF}
-            className="w-full bg-[#d97706] hover:bg-[#b45309] text-white font-bold py-3 px-4 rounded-xl shadow-md flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-[0.98] text-xs"
+            className="w-full bg-[#d97706] hover:bg-[#b45309] text-white font-bold py-3.5 px-4 rounded-2xl shadow-md flex items-center justify-center gap-2.5 cursor-pointer transition-all active:scale-[0.98] text-xs sm:text-sm"
           >
-            <Download className="w-4 h-4" />
+            <Download className="w-4.5 h-4.5 text-white shrink-0" />
             <span>Download PDF Statement</span>
           </button>
 
           <button
             onClick={handleShareWhatsApp}
-            className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 px-4 rounded-xl shadow-md flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-[0.98] text-xs"
+            className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3.5 px-4 rounded-2xl shadow-md flex items-center justify-center gap-2.5 cursor-pointer transition-all active:scale-[0.98] text-xs sm:text-sm"
           >
-            <Share2 className="w-4 h-4" />
+            <Share2 className="w-4.5 h-4.5 text-white shrink-0" />
             <span>Share Summary via WhatsApp</span>
           </button>
         </div>
