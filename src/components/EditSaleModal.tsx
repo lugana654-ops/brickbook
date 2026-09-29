@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from "react";
 import { Calendar, X } from "lucide-react";
 import { Sale } from "@/context/CustomersContext";
+import { useProduction } from "@/context/ProductionContext";
 import DatePickerModal from "@/components/DatePickerModal";
 import { formatVehicleNumber } from "@/lib/formatters";
 
@@ -19,6 +20,7 @@ export default function EditSaleModal({
   sale,
   onSave,
 }: EditSaleModalProps) {
+  const { getAvailableStock } = useProduction();
   const [brickType, setBrickType] = useState<"4 inch" | "6 inch">("6 inch");
   const [brickCount, setBrickCount] = useState<number | "">("");
   const [ratePerBrick, setRatePerBrick] = useState<number | "">("");
@@ -29,6 +31,12 @@ export default function EditSaleModal({
   const [paymentMode, setPaymentMode] = useState<string>("Cash");
   const [isPickerOpen, setIsPickerOpen] = useState(false);
   const [error, setError] = useState("");
+
+  const { totalStock, goodStock } = getAvailableStock(brickType);
+  const adjustedTotal = totalStock + (sale && sale.brickType === brickType ? sale.brickCount : 0);
+  const adjustedGood = goodStock + (sale && sale.brickType === brickType ? sale.brickCount : 0);
+  const numCount = typeof brickCount === "number" ? brickCount : 0;
+  const isOverGoodStock = numCount > adjustedGood && numCount <= adjustedTotal;
 
   useEffect(() => {
     if (isOpen && sale) {
@@ -71,6 +79,10 @@ export default function EditSaleModal({
   const handleSave = () => {
     if (!brickCount || Number(brickCount) <= 0) {
       setError("Please enter a valid brick count.");
+      return;
+    }
+    if (numCount > adjustedTotal) {
+      setError(`Insufficient total yard stock. Available for ${brickType}: ${adjustedTotal.toLocaleString()} bricks.`);
       return;
     }
     if (!ratePerBrick || Number(ratePerBrick) <= 0) {
@@ -127,7 +139,15 @@ export default function EditSaleModal({
           </button>
         </div>
 
-        {error && <p className="text-xs font-bold text-red-600 text-center">{error}</p>}
+        {error && <p className="text-xs font-bold text-red-600 text-center bg-red-50 p-2.5 rounded-xl border border-red-200">{error}</p>}
+
+        {isOverGoodStock && (
+          <div className="bg-amber-100/90 border border-amber-300 rounded-xl p-3 flex items-start gap-2 text-amber-950 text-xs font-medium">
+            <span className="leading-relaxed">
+              ⚠️ Note: Dispatching <strong className="font-extrabold">{(numCount - adjustedGood).toLocaleString()}</strong> bricks still in curing phase ({adjustedGood.toLocaleString()} fully cured available).
+            </span>
+          </div>
+        )}
 
         {/* Brick Type Select */}
         <div>

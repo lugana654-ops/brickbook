@@ -185,80 +185,86 @@ function ProductionHistoryContent() {
             </p>
           </div>
         ) : (
-          filteredRecords.map((item) => (
-            <div
-              key={item.id}
-              className="bg-white rounded-2xl p-4 shadow-sm border border-slate-200/80 flex flex-col gap-2.5"
-            >
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-9 h-9 rounded-xl bg-amber-100/80 flex items-center justify-center">
-                    <Package className="w-5 h-5 text-amber-700" />
+          filteredRecords.map((item) => {
+            const isSoldOut = item.remainingQuantity === 0;
+
+            return (
+              <div
+                key={item.id}
+                className="bg-white rounded-2xl p-4 shadow-sm border border-slate-200/80 flex flex-col gap-2.5"
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-9 h-9 rounded-xl bg-amber-100/80 flex items-center justify-center shrink-0">
+                      <Package className="w-5 h-5 text-amber-700" />
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-bold text-slate-900 leading-tight">
+                        {item.brickType}
+                      </h3>
+                      <p className="text-xs font-semibold text-slate-600 mt-0.5">
+                        Quantity: <span className="font-extrabold text-slate-900">{item.quantity.toLocaleString()} Bricks</span>{" "}
+                        <span className="text-slate-400 font-normal">({item.stepCount} steps)</span>
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col items-end gap-1.5">
+                    <span
+                      className={`px-2.5 py-1 rounded-full text-[11px] font-bold flex items-center gap-1 ${
+                        isSoldOut
+                          ? "bg-slate-100 text-slate-600 border border-slate-200"
+                          : item.isGood
+                          ? "bg-emerald-100 text-emerald-800"
+                          : "bg-amber-100 text-amber-800"
+                      }`}
+                    >
+                      {isSoldOut ? (
+                        <CheckCircle2 className="w-3.5 h-3.5 text-slate-500" />
+                      ) : item.isGood ? (
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-700" />
+                      ) : (
+                        <Clock className="w-3.5 h-3.5 text-amber-700" />
+                      )}
+                      {isSoldOut ? "Dispatched" : item.isGood ? "Ready" : `${item.daysRemaining} days left`}
+                    </span>
+
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <button
+                        onClick={() => startEdit(item)}
+                        className="p-1 rounded-lg text-slate-500 hover:text-amber-700 hover:bg-amber-50 transition-colors cursor-pointer"
+                        title="Edit Entry"
+                      >
+                        <Edit2 className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={() => handleDelete(item.id)}
+                        className="p-1 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors cursor-pointer"
+                        title="Delete Entry"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="border-t border-slate-100 pt-2 flex items-center justify-between text-xs text-slate-500 font-medium">
+                  <div>
+                    Prod Date:{" "}
+                    <span className="font-semibold text-slate-700">
+                      {formatDate(item.productionDate)}
+                    </span>
                   </div>
                   <div>
-                    <h3 className="text-sm font-bold text-slate-900 leading-tight">
-                      {item.brickType}
-                    </h3>
-                    <p className="text-xs font-semibold text-amber-800">
-                      {item.quantity} Bricks
-                    </p>
-                    <p className="text-[11px] font-medium text-slate-400">
-                      {item.stepCount} steps
-                    </p>
-                  </div>
-                </div>
-
-                <div className="flex flex-col items-end gap-1.5">
-                  <span
-                    className={`px-2.5 py-1 rounded-full text-[11px] font-bold flex items-center gap-1 ${
-                      item.isGood
-                        ? "bg-emerald-100 text-emerald-800"
-                        : "bg-amber-100 text-amber-800"
-                    }`}
-                  >
-                    {item.isGood ? (
-                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-700" />
-                    ) : (
-                      <Clock className="w-3.5 h-3.5 text-amber-700" />
-                    )}
-                    {item.isGood ? "Ready" : `${item.daysRemaining} days left`}
-                  </span>
-
-                  <div className="flex items-center gap-2 mt-0.5">
-                    <button
-                      onClick={() => startEdit(item)}
-                      className="p-1 rounded-lg text-slate-500 hover:text-amber-700 hover:bg-amber-50 transition-colors cursor-pointer"
-                      title="Edit Entry"
-                    >
-                      <Edit2 className="w-4 h-4" />
-                    </button>
-                    <button
-                      onClick={() => handleDelete(item.id)}
-                      className="p-1 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors cursor-pointer"
-                      title="Delete Entry"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                    Ready Date:{" "}
+                    <span className="font-semibold text-slate-700">
+                      {formatDate(item.goodDate)}
+                    </span>
                   </div>
                 </div>
               </div>
-
-              <div className="border-t border-slate-100 pt-2 flex items-center justify-between text-xs text-slate-500 font-medium">
-                <div>
-                  Prod Date:{" "}
-                  <span className="font-semibold text-slate-700">
-                    {formatDate(item.productionDate)}
-                  </span>
-                </div>
-                <div>
-                  Ready Date:{" "}
-                  <span className="font-semibold text-slate-700">
-                    {formatDate(item.goodDate)}
-                  </span>
-                </div>
-              </div>
-            </div>
-          ))
+            );
+          })
         )}
       </div>
 

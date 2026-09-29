@@ -86,7 +86,7 @@ export default function AddProductionPage() {
 
   const currentProdDate = new Date(prodDateStr || todayStr);
   const readyDateObj = new Date(currentProdDate);
-  readyDateObj.setDate(readyDateObj.getDate() + 13);
+  readyDateObj.setDate(readyDateObj.getDate() + 14);
 
   // Build goodDate string (YYYY-MM-DD)
   const goodDateStr = (() => {
@@ -320,7 +320,7 @@ export default function AddProductionPage() {
             <span className="font-bold text-amber-900">{brickCount}</span>
           </div>
           <div>
-            Ready Days: <span className="font-bold">13</span>
+            Ready Days: <span className="font-bold">14</span>
           </div>
           <div>
             Ready Date:{" "}

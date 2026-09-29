@@ -6,12 +6,14 @@ import { useRouter, useParams } from "next/navigation";
 import { ArrowLeft, Calendar } from "lucide-react";
 import DatePickerModal from "@/components/DatePickerModal";
 import { useCustomers, Customer } from "@/context/CustomersContext";
+import { useProduction } from "@/context/ProductionContext";
 import { formatVehicleNumber } from "@/lib/formatters";
 
 export default function AddSalePage() {
   const router = useRouter();
   const params = useParams();
   const { customers, addSale } = useCustomers();
+  const { getAvailableStock } = useProduction();
 
   const customerId = params?.id as string;
   const [customer, setCustomer] = useState<Customer | null>(null);
@@ -38,6 +40,10 @@ export default function AddSalePage() {
   const todayStr = new Date().toISOString().split("T")[0];
   const [saleDateStr, setSaleDateStr] = useState<string>(todayStr);
 
+  const { totalStock, goodStock } = getAvailableStock(brickType);
+  const numCount = typeof brickCount === "number" ? brickCount : 0;
+  const isOverGoodStock = numCount > goodStock && numCount <= totalStock;
+
   const formatDate = (dateStr: string) => {
     const parts = dateStr.split("-");
     if (parts.length === 3) {
@@ -58,6 +64,10 @@ export default function AddSalePage() {
   const handleSave = () => {
     if (!brickCount || brickCount <= 0) {
       setError("Please enter a valid brick count.");
+      return;
+    }
+    if (numCount > totalStock) {
+      setError(`Insufficient total yard stock. Total available for ${brickType}: ${totalStock.toLocaleString()} bricks.`);
       return;
     }
     if (!ratePerBrick || ratePerBrick <= 0) {
@@ -123,7 +133,15 @@ export default function AddSalePage() {
           <h2 className="text-base font-bold text-slate-800">For {customer.name}</h2>
         </div>
 
-        {error && <p className="text-xs font-bold text-red-600 text-center">{error}</p>}
+        {error && <p className="text-xs font-bold text-red-600 text-center bg-red-50 p-2.5 rounded-xl border border-red-200">{error}</p>}
+
+        {isOverGoodStock && (
+          <div className="bg-amber-100/90 border border-amber-300 rounded-xl p-3 flex items-start gap-2 text-amber-950 text-xs font-medium">
+            <span className="leading-relaxed">
+              ⚠️ Note: Dispatching <strong className="font-extrabold">{(numCount - goodStock).toLocaleString()}</strong> bricks still in curing phase ({goodStock.toLocaleString()} fully cured available).
+            </span>
+          </div>
+        )}
 
         {/* Brick Type Select */}
         <div>

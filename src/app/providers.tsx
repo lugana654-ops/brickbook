@@ -6,8 +6,8 @@ import React from "react";
 
 export default function Providers({ children }: { children: React.ReactNode }) {
   return (
-    <ProductionProvider>
-      <CustomersProvider>{children}</CustomersProvider>
-    </ProductionProvider>
+    <CustomersProvider>
+      <ProductionProvider>{children}</ProductionProvider>
+    </CustomersProvider>
   );
 }

@@ -32,24 +32,28 @@ export default function DashboardPage() {
       icon: <Package className="w-5 h-5 text-[#d97706] fill-[#d97706]" />,
       value: stats.total4inch,
       label: "Total 4inch",
+      subtext: `Curing: ${stats.curing4inch.toLocaleString()}`,
     },
     {
       id: "total-6inch",
       icon: <Package className="w-5 h-5 text-[#d97706] fill-[#d97706]" />,
       value: stats.total6inch,
       label: "Total 6inch",
+      subtext: `Curing: ${stats.curing6inch.toLocaleString()}`,
     },
     {
       id: "good-4inch",
       icon: <CheckCircle2 className="w-5 h-5 text-[#d97706] fill-[#d97706]" />,
       value: stats.good4inch,
       label: "Good 4inch",
+      subtext: "Ready to dispatch",
     },
     {
       id: "good-6inch",
       icon: <CheckCircle2 className="w-5 h-5 text-[#d97706] fill-[#d97706]" />,
       value: stats.good6inch,
       label: "Good 6inch",
+      subtext: "Ready to dispatch",
     },
   ];
 
@@ -85,18 +89,23 @@ export default function DashboardPage() {
               <div
                 key={card.id}
                 id={`card-${card.id}`}
-                className="bg-white rounded-3xl p-5 shadow-sm border border-slate-100 flex flex-col justify-between h-[145px]"
+                className="bg-white rounded-3xl p-5 shadow-sm border border-slate-100 flex flex-col justify-between h-[155px]"
               >
                 <div className="w-10 h-10 rounded-full bg-[#fef3c7] flex items-center justify-center mb-1">
                   {card.icon}
                 </div>
                 <div className="flex flex-col">
-                  <span className="text-3xl font-extrabold text-[#111827] my-0.5">
+                  <span className="text-2xl sm:text-3xl font-extrabold text-[#111827] my-0.5">
                     {card.value.toLocaleString()}
                   </span>
-                  <span className="text-xs font-medium text-slate-400">
+                  <span className="text-xs font-bold text-slate-700">
                     {card.label}
                   </span>
+                  {card.subtext && (
+                    <span className="text-[10px] font-semibold text-amber-700 mt-0.5">
+                      {card.subtext}
+                    </span>
+                  )}
                 </div>
               </div>
             ))}
