@@ -263,18 +263,18 @@ export default function GenerateBillModal({
           <div className="bg-slate-50/90 rounded-2xl p-3.5 border border-slate-200 flex flex-col gap-2.5 text-xs font-sans shadow-xs">
             {/* Table Header */}
             <div className="grid grid-cols-12 text-[10px] font-extrabold text-slate-500 uppercase tracking-wider border-b border-slate-200 pb-2">
-              <div className="col-span-4 text-left">ITEM</div>
-              <div className="col-span-3 text-right">QTY</div>
-              <div className="col-span-2 text-right">RATE</div>
+              <div className="col-span-3 text-left">ITEM</div>
+              <div className="col-span-3 text-center">QTY</div>
+              <div className="col-span-3 text-center">RATE</div>
               <div className="col-span-3 text-right">AMOUNT</div>
             </div>
 
             {/* Rows */}
             {total4Inch > 0 && (
-              <div className="grid grid-cols-12 text-xs text-slate-700 items-center py-1">
-                <div className="col-span-4 font-bold text-slate-800 truncate pr-1">4" Bricks</div>
-                <div className="col-span-3 text-right font-medium text-slate-600">{total4Inch.toLocaleString("en-IN")} pcs</div>
-                <div className="col-span-2 text-right text-[11px] font-medium text-slate-500">
+              <div className="grid grid-cols-12 text-xs text-slate-700 items-center py-1.5">
+                <div className="col-span-3 text-left font-bold text-slate-800 truncate pr-1">4" Bricks</div>
+                <div className="col-span-3 text-center font-medium text-slate-600">{total4Inch.toLocaleString("en-IN")} pcs</div>
+                <div className="col-span-3 text-center font-medium text-slate-600">
                   {rateStr4Inch}
                 </div>
                 <div className="col-span-3 text-right font-extrabold text-[#213547]">
@@ -284,10 +284,10 @@ export default function GenerateBillModal({
             )}
 
             {total6Inch > 0 && (
-              <div className="grid grid-cols-12 text-xs text-slate-700 items-center py-1">
-                <div className="col-span-4 font-bold text-slate-800 truncate pr-1">6" Bricks</div>
-                <div className="col-span-3 text-right font-medium text-slate-600">{total6Inch.toLocaleString("en-IN")} pcs</div>
-                <div className="col-span-2 text-right text-[11px] font-medium text-slate-500">
+              <div className="grid grid-cols-12 text-xs text-slate-700 items-center py-1.5">
+                <div className="col-span-3 text-left font-bold text-slate-800 truncate pr-1">6" Bricks</div>
+                <div className="col-span-3 text-center font-medium text-slate-600">{total6Inch.toLocaleString("en-IN")} pcs</div>
+                <div className="col-span-3 text-center font-medium text-slate-600">
                   {rateStr6Inch}
                 </div>
                 <div className="col-span-3 text-right font-extrabold text-[#213547]">

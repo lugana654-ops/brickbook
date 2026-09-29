@@ -26,7 +26,7 @@ export function formatRate(rate: number) {
   const numStr = isInt
     ? Math.round(rate).toLocaleString("en-IN")
     : rate.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  return `@ Rs. ${numStr}`;
+  return `Rs. ${numStr}`;
 }
 
 export function getRateDisplay(salesForType: Sale[]): string {
