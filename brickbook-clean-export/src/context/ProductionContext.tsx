@@ -28,6 +28,8 @@ export interface EnrichedRecord extends ProductionRecord {
 interface ProductionContextValue {
   records: ProductionRecord[];
   addRecord: (entry: Omit<ProductionRecord, "id">) => void;
+  updateRecord: (id: string, entry: Omit<ProductionRecord, "id">) => void;
+  deleteRecord: (id: string) => void;
   enrichedRecords: EnrichedRecord[];
   // Computed dashboard stats
   stats: {
@@ -126,11 +128,23 @@ export function ProductionProvider({ children }: { children: React.ReactNode }) 
     setRecords((prev) => [newRecord, ...prev]);
   }, []);
 
+  const updateRecord = useCallback((id: string, entry: Omit<ProductionRecord, "id">) => {
+    setRecords((prev) =>
+      prev.map((r) => (r.id === id ? { ...entry, id } : r))
+    );
+  }, []);
+
+  const deleteRecord = useCallback((id: string) => {
+    setRecords((prev) => prev.filter((r) => r.id !== id));
+  }, []);
+
   const enrichedRecords = records.map(enrich);
   const stats = computeStats(records);
 
   return (
-    <ProductionContext.Provider value={{ records, addRecord, enrichedRecords, stats }}>
+    <ProductionContext.Provider
+      value={{ records, addRecord, updateRecord, deleteRecord, enrichedRecords, stats }}
+    >
       {children}
     </ProductionContext.Provider>
   );

@@ -1,7 +1,8 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect, Suspense } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import {
   ArrowLeft,
   RotateCcw,
@@ -10,28 +11,47 @@ import {
   Package,
   CheckCircle2,
   Clock,
+  Edit2,
+  Trash2,
+  X,
 } from "lucide-react";
 import DatePickerModal from "@/components/DatePickerModal";
-import { useProduction } from "@/context/ProductionContext";
+import { useProduction, ProductionRecord } from "@/context/ProductionContext";
 
-export default function ProductionHistoryPage() {
-  const { enrichedRecords } = useProduction();
+function ProductionHistoryContent() {
+  const searchParams = useSearchParams();
+  const initialQuery = searchParams.get("search") || "";
+
+  const { enrichedRecords, updateRecord, deleteRecord } = useProduction();
 
   // Sort descending by productionDate (newest first)
   const sortedRecords = [...enrichedRecords].sort((a, b) =>
     b.productionDate.localeCompare(a.productionDate)
   );
 
-  const [searchQuery, setSearchQuery] = useState("");
-  const [isPickerOpen, setIsPickerOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState(initialQuery);
+  const [isFilterPickerOpen, setIsFilterPickerOpen] = useState(false);
+
+  // Edit Modal State
+  const [editingRecord, setEditingRecord] = useState<ProductionRecord | null>(null);
+  const [editSteps, setEditSteps] = useState<number | "">("");
+  const [editBrickType, setEditBrickType] = useState<"4 inch" | "6 inch">("6 inch");
+  const [editDateStr, setEditDateStr] = useState<string>("");
+  const [isEditPickerOpen, setIsEditPickerOpen] = useState(false);
+
+  useEffect(() => {
+    const q = searchParams.get("search");
+    if (q) {
+      setSearchQuery(q);
+    }
+  }, [searchParams]);
 
   const todayObj = new Date();
   const todayStr = todayObj.toISOString().split("T")[0];
 
   const handleDateSelect = (selectedDate: string) => {
     if (selectedDate) {
-      const [year, month, day] = selectedDate.split("-");
-      setSearchQuery(`${parseInt(day)}-${parseInt(month)}-${year}`);
+      setSearchQuery(selectedDate);
     }
   };
 
@@ -39,11 +59,50 @@ export default function ProductionHistoryPage() {
     setSearchQuery("");
   };
 
+  const startEdit = (item: ProductionRecord) => {
+    setEditingRecord(item);
+    setEditSteps(item.stepCount);
+    setEditBrickType(item.brickType);
+    setEditDateStr(item.productionDate);
+  };
+
+  const handleSaveEdit = () => {
+    if (!editingRecord) return;
+    const stepsNum = typeof editSteps === "number" && editSteps > 0 ? editSteps : 0;
+    if (stepsNum <= 0) {
+      alert("Please enter a valid step count.");
+      return;
+    }
+
+    const multiplier = editBrickType === "4 inch" ? 8 : 5;
+    const quantity = stepsNum * multiplier;
+
+    const prodDate = new Date(editDateStr || todayStr);
+    const readyDate = new Date(prodDate);
+    readyDate.setDate(readyDate.getDate() + 13);
+    const goodDateStr = readyDate.toISOString().split("T")[0];
+
+    updateRecord(editingRecord.id, {
+      brickType: editBrickType,
+      stepCount: stepsNum,
+      quantity,
+      productionDate: editDateStr,
+      goodDate: goodDateStr,
+    });
+
+    setEditingRecord(null);
+  };
+
+  const handleDelete = (id: string) => {
+    if (confirm("Are you sure you want to delete this production entry?")) {
+      deleteRecord(id);
+    }
+  };
+
   // Filter records by search query (date or brick type)
   const filteredRecords = sortedRecords.filter((r) => {
     if (!searchQuery) return true;
     const q = searchQuery.toLowerCase();
-    // productionDate is YYYY-MM-DD; also match the formatted D-M-YYYY display
     const [yyyy, mm, dd] = r.productionDate.split("-");
     const displayDate = `${parseInt(dd)}-${parseInt(mm)}-${yyyy}`;
     return (
@@ -93,7 +152,7 @@ export default function ProductionHistoryPage() {
           />
           <button
             type="button"
-            onClick={() => setIsPickerOpen(true)}
+            onClick={() => setIsFilterPickerOpen(true)}
             aria-label="Open date picker"
             className="shrink-0 flex items-center justify-center text-slate-600 hover:text-amber-700 transition-colors cursor-pointer"
           >
@@ -149,20 +208,39 @@ export default function ProductionHistoryPage() {
                   </div>
                 </div>
 
-                <span
-                  className={`px-2.5 py-1 rounded-full text-[11px] font-bold flex items-center gap-1 ${
-                    item.isGood
-                      ? "bg-emerald-100 text-emerald-800"
-                      : "bg-amber-100 text-amber-800"
-                  }`}
-                >
-                  {item.isGood ? (
-                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-700" />
-                  ) : (
-                    <Clock className="w-3.5 h-3.5 text-amber-700" />
-                  )}
-                  {item.isGood ? "Ready" : `${item.daysRemaining} days left`}
-                </span>
+                <div className="flex flex-col items-end gap-1.5">
+                  <span
+                    className={`px-2.5 py-1 rounded-full text-[11px] font-bold flex items-center gap-1 ${
+                      item.isGood
+                        ? "bg-emerald-100 text-emerald-800"
+                        : "bg-amber-100 text-amber-800"
+                    }`}
+                  >
+                    {item.isGood ? (
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-700" />
+                    ) : (
+                      <Clock className="w-3.5 h-3.5 text-amber-700" />
+                    )}
+                    {item.isGood ? "Ready" : `${item.daysRemaining} days left`}
+                  </span>
+
+                  <div className="flex items-center gap-2 mt-0.5">
+                    <button
+                      onClick={() => startEdit(item)}
+                      className="p-1 rounded-lg text-slate-500 hover:text-amber-700 hover:bg-amber-50 transition-colors cursor-pointer"
+                      title="Edit Entry"
+                    >
+                      <Edit2 className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => handleDelete(item.id)}
+                      className="p-1 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors cursor-pointer"
+                      title="Delete Entry"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
               </div>
 
               <div className="border-t border-slate-100 pt-2 flex items-center justify-between text-xs text-slate-500 font-medium">
@@ -184,13 +262,94 @@ export default function ProductionHistoryPage() {
         )}
       </div>
 
-      {/* DatePickerModal Popup */}
+      {/* DatePickerModal Popup for Filter */}
       <DatePickerModal
-        isOpen={isPickerOpen}
-        onClose={() => setIsPickerOpen(false)}
+        isOpen={isFilterPickerOpen}
+        onClose={() => setIsFilterPickerOpen(false)}
         selectedDate={todayStr}
         onSelectDate={handleDateSelect}
       />
+
+      {/* Edit Entry Modal */}
+      {editingRecord && (
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl p-5 w-full max-w-[360px] shadow-2xl flex flex-col gap-4 animate-in fade-in zoom-in-95">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <h3 className="text-base font-bold text-slate-800">Edit Production Entry</h3>
+              <button
+                onClick={() => setEditingRecord(null)}
+                className="text-slate-400 hover:text-slate-600 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div>
+              <label className="text-xs font-semibold text-slate-500 mb-1 block">Brick Type</label>
+              <select
+                value={editBrickType}
+                onChange={(e) => setEditBrickType(e.target.value as "4 inch" | "6 inch")}
+                className="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-2.5 text-sm font-medium text-slate-700 outline-none"
+              >
+                <option value="6 inch">6 inch</option>
+                <option value="4 inch">4 inch</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="text-xs font-semibold text-slate-500 mb-1 block">Step Count</label>
+              <input
+                type="number"
+                value={editSteps}
+                onChange={(e) => setEditSteps(e.target.value === "" ? "" : Number(e.target.value))}
+                className="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-2.5 text-sm font-medium text-slate-700 outline-none"
+              />
+            </div>
+
+            <div>
+              <label className="text-xs font-semibold text-slate-500 mb-1 block">Production Date</label>
+              <div
+                onClick={() => setIsEditPickerOpen(true)}
+                className="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-2.5 flex items-center justify-between cursor-pointer hover:border-amber-500"
+              >
+                <span className="text-xs font-semibold text-slate-700">{formatDate(editDateStr)}</span>
+                <Calendar className="w-4 h-4 text-slate-500" />
+              </div>
+            </div>
+
+            <div className="flex gap-2 mt-2">
+              <button
+                onClick={() => setEditingRecord(null)}
+                className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-2.5 rounded-xl text-xs transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveEdit}
+                className="flex-1 bg-amber-600 hover:bg-amber-700 text-white font-bold py-2.5 rounded-xl text-xs transition-colors cursor-pointer"
+              >
+                Save Changes
+              </button>
+            </div>
+          </div>
+
+          <DatePickerModal
+            isOpen={isEditPickerOpen}
+            onClose={() => setIsEditPickerOpen(false)}
+            selectedDate={editDateStr || todayStr}
+            onSelectDate={(d) => setEditDateStr(d)}
+            maxDate={todayStr}
+          />
+        </div>
+      )}
     </div>
+  );
+}
+
+export default function ProductionHistoryPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-[#f3f4f6] max-w-[400px] mx-auto p-6">Loading...</div>}>
+      <ProductionHistoryContent />
+    </Suspense>
   );
 }
