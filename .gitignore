@@ -1,0 +1,80 @@
+# ==========================================
+# BrickBook - Root .gitignore
+# ==========================================
+
+# Operating System Files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+[Dd]esktop.ini
+
+# Environment Variables & Secrets (NEVER COMMIT SECRETS)
+.env
+.env*.local
+.env.development
+.env.production
+.env.test
+*.pem
+*.key
+*.cert
+*.pfx
+
+# Node & Package Managers (Frontend & Backend)
+node_modules/
+.pnpm-store/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Next.js (frontend)
+frontend/.next/
+frontend/out/
+frontend/build/
+.next/
+out/
+
+# NestJS / TypeScript Build Outputs (backend)
+backend/dist/
+backend/build/
+dist/
+build/
+*.tsbuildinfo
+
+# Testing & Coverage
+coverage/
+.nyc_output/
+*.lcov
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
+
+# Prisma & Local Databases
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+*.sqlite-journal
+
+# IDEs & Code Editors
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+*.sublime-project
+*.sublime-workspace
+*.swp
+*.swo
+
+# Temporary Files, Caches & Logs
+logs/
+*.log
+.cache/
+.temp/
+.tmp/
