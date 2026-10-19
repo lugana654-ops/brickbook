@@ -1,9 +1,9 @@
 'use client';
 
-import React, { useState, useRef } from 'react';
-import { useRouter } from 'next/navigation';
-import { Calendar } from 'lucide-react';
+import React, { useState, useRef, useEffect } from 'react';
+import { Calendar, CheckCircle2, X } from 'lucide-react';
 import Header from '@/components/layout/Header';
+import DatePickerModal from '@/components/ui/DatePickerModal';
 import { useBrickBook } from '@/context/BrickBookContext';
 import { BlockType } from '@/types';
 import { addDaysToDate, getTodayDateString } from '@/lib/curingCalculator';
@@ -28,7 +28,6 @@ function formatCustomDate(dateStr: string): string {
 }
 
 export default function AddProductionPage() {
-  const router = useRouter();
   const { addProduction } = useBrickBook();
 
   // Initial state defaults matching screenshot
@@ -36,11 +35,21 @@ export default function AddProductionPage() {
   const [steps, setSteps] = useState<string>('');
   const [date, setDate] = useState<string>(getTodayDateString());
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
 
-  const dateInputRef = useRef<HTMLInputElement>(null);
+  const successTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Press calculations: 4" -> 8 bricks/step, 6" -> 5 bricks/step, 8" -> 4 bricks/step
-  const blocksPerStep = blockType === '4inch' ? 8 : blockType === '6inch' ? 5 : blockType === '8inch' ? 4 : 8;
+  useEffect(() => {
+    return () => {
+      if (successTimeoutRef.current) {
+        clearTimeout(successTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  // Press calculations: 4" -> 8 bricks/step, 6" -> 5 bricks/step
+  const blocksPerStep = blockType === '4inch' ? 8 : 5;
   const numSteps = Number(steps) || 0;
   const brickCount = numSteps > 0 && blockType ? numSteps * blocksPerStep : 0;
 
@@ -49,23 +58,10 @@ export default function AddProductionPage() {
   const readyDate = addDaysToDate(date || getTodayDateString(), readyDays);
   const readyDateFormatted = formatCustomDate(readyDate);
 
-  const handleCalendarClick = () => {
-    if (dateInputRef.current) {
-      if ('showPicker' in HTMLInputElement.prototype) {
-        try {
-          dateInputRef.current.showPicker();
-        } catch {
-          dateInputRef.current.focus();
-        }
-      } else {
-        dateInputRef.current.focus();
-      }
-    }
-  };
-
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
+    setSuccessMessage(null);
 
     if (!blockType) {
       setErrorMessage('Please select a brick type.');
@@ -77,7 +73,13 @@ export default function AddProductionPage() {
       return;
     }
 
-    const multiplier = blockType === '4inch' ? 80 : blockType === '6inch' ? 50 : 40;
+    const todayStr = getTodayDateString();
+    if (date > todayStr) {
+      setErrorMessage('Production date cannot be in the future. Please select today or a past date.');
+      return;
+    }
+
+    const multiplier = blockType === '4inch' ? 80 : 50;
     const cementBags = Math.max(1, Math.round(brickCount / multiplier));
 
     const result = addProduction({
@@ -96,13 +98,44 @@ export default function AddProductionPage() {
       return;
     }
 
-    router.push('/production/history');
+    setSuccessMessage('Production saved successfully!');
+    if (successTimeoutRef.current) {
+      clearTimeout(successTimeoutRef.current);
+    }
+    successTimeoutRef.current = setTimeout(() => {
+      setSuccessMessage(null);
+    }, 4000);
   };
 
   return (
     <div className="flex flex-col min-h-full bg-[#f3f4f6]">
       {/* Top Header matching exact Navy (#213547) */}
       <Header title="Add Production" showBack={true} backHref="/production" />
+
+      {/* Success Toast Notification */}
+      {successMessage && (
+        <div
+          id="production-success-toast"
+          role="status"
+          aria-live="polite"
+          className="fixed top-4 left-1/2 -translate-x-1/2 z-50 flex items-center justify-between gap-3 rounded-2xl bg-[#059669] px-4 py-3.5 text-white shadow-xl transition-all max-w-[368px] w-[90%]"
+        >
+          <div className="flex items-center gap-2.5">
+            <CheckCircle2 size={18} className="shrink-0 text-white" />
+            <span className="text-sm font-semibold tracking-wide">
+              {successMessage}
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setSuccessMessage(null)}
+            className="rounded-full p-1 text-white/80 hover:bg-white/20 hover:text-white transition-colors cursor-pointer"
+            aria-label="Dismiss notification"
+          >
+            <X size={16} />
+          </button>
+        </div>
+      )}
 
       <div className="px-4 pt-5 pb-8">
         {/* Large Peach Cream Container matching exact screenshot */}
@@ -121,22 +154,20 @@ export default function AddProductionPage() {
                 onChange={(e) => {
                   setBlockType(e.target.value as BlockType);
                   setErrorMessage(null);
+                  setSuccessMessage(null);
                 }}
                 className={`w-full h-full bg-transparent text-[15px] font-medium appearance-none focus:outline-none cursor-pointer pr-8 ${
                   blockType ? 'text-gray-800' : 'text-gray-500'
                 }`}
               >
                 <option value="" disabled className="text-gray-400">
-                  Brick Type
+                  Select Brick Type
                 </option>
                 <option value="4inch" className="text-gray-800">
-                  4 inch
+                  4-inch Solid Concrete Block
                 </option>
                 <option value="6inch" className="text-gray-800">
-                  6 inch
-                </option>
-                <option value="8inch" className="text-gray-800">
-                  8 inch
+                  6-inch Solid Concrete Block
                 </option>
               </select>
               <div className="pointer-events-none absolute right-4 flex items-center text-gray-400">
@@ -155,6 +186,7 @@ export default function AddProductionPage() {
                 onChange={(e) => {
                   setSteps(e.target.value);
                   setErrorMessage(null);
+                  setSuccessMessage(null);
                 }}
                 placeholder="Number of Steps"
                 className="w-full bg-transparent text-[15px] font-medium text-gray-800 placeholder-gray-500 focus:outline-none"
@@ -163,8 +195,8 @@ export default function AddProductionPage() {
 
             {/* 3. Production Date Picker Field */}
             <div
-              onClick={handleCalendarClick}
-              className="relative rounded-2xl bg-white border border-gray-300 shadow-xs py-2.5 px-4 flex items-center justify-between cursor-pointer"
+              onClick={() => setIsDatePickerOpen(true)}
+              className="relative rounded-2xl bg-white border border-gray-300 shadow-xs py-2.5 px-4 flex items-center justify-between cursor-pointer hover:border-amber-300 transition-colors"
             >
               <div>
                 <p className="text-xs font-semibold text-gray-700 leading-tight">
@@ -175,15 +207,20 @@ export default function AddProductionPage() {
                 </p>
               </div>
               <Calendar size={20} className="text-gray-700 shrink-0" />
-              <input
-                type="date"
-                ref={dateInputRef}
-                value={date}
-                onChange={(e) => setDate(e.target.value)}
-                className="sr-only"
-                aria-hidden="true"
-              />
             </div>
+
+            <DatePickerModal
+              isOpen={isDatePickerOpen}
+              value={date}
+              title="Select date"
+              maxDate={getTodayDateString()}
+              onChange={(newDate) => {
+                setDate(newDate);
+                setErrorMessage(null);
+                setSuccessMessage(null);
+              }}
+              onClose={() => setIsDatePickerOpen(false)}
+            />
 
             {/* 4. Live Curing Preview Summary Card */}
             <div className="rounded-2xl bg-[#fdecdb] p-4 space-y-1.5 mt-2">

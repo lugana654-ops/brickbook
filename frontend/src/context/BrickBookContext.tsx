@@ -7,6 +7,7 @@ import {
   Customer,
   DispatchRecord,
   PaymentRecord,
+  PaymentMode,
   LedgerEntry,
   UserSession,
   BLOCK_CONFIGS,
@@ -130,15 +131,9 @@ export function BrickBookProvider({ children }: { children: ReactNode }) {
   // Load state from localStorage on initial mount with dummy data purge guard
   useEffect(() => {
     try {
-      // 1. One-time purge of any previously seeded dummy/sample data in browser storage
       if (typeof window !== 'undefined' && window.localStorage) {
         const cleanupKey = 'brickbook_dummy_data_cleared_v1';
         if (!localStorage.getItem(cleanupKey)) {
-          ALL_BUSINESS_STORAGE_KEYS.forEach((key) => {
-            try {
-              localStorage.removeItem(key);
-            } catch {}
-          });
           localStorage.setItem(cleanupKey, 'true');
         }
       }
@@ -146,10 +141,26 @@ export function BrickBookProvider({ children }: { children: ReactNode }) {
       const savedUser = getFromStorage<UserSession | null>(STORAGE_KEYS.USER, null);
       if (savedUser) setUser(savedUser);
 
-      const savedProd = getFromStorage<ProductionRecord[] | null>(STORAGE_KEYS.PRODUCTIONS, null);
-      if (savedProd && Array.isArray(savedProd)) {
-        const realProd = savedProd.filter((p) => !p.id.startsWith('seed_'));
-        setProductions(normalizeProductionRecords(realProd));
+      // Load production records from brickbook_production_records, also checking legacy brickbook_productions
+      const savedRecords = getFromStorage<ProductionRecord[] | null>(STORAGE_KEYS.PRODUCTION_RECORDS, null);
+      const savedLegacy = getFromStorage<ProductionRecord[] | null>(STORAGE_KEYS.PRODUCTIONS, null);
+      const combinedProd = [
+        ...(Array.isArray(savedRecords) ? savedRecords : []),
+        ...(Array.isArray(savedLegacy) ? savedLegacy : []),
+      ];
+
+      if (combinedProd.length > 0) {
+        const prodMap = new Map<string, ProductionRecord>();
+        combinedProd.forEach((p) => {
+          if (p && p.id && !p.id.startsWith('seed_')) {
+            prodMap.set(p.id, p);
+          }
+        });
+        const realProd = Array.from(prodMap.values());
+        const normalized = normalizeProductionRecords(realProd);
+        setProductions(normalized);
+        setToStorage(STORAGE_KEYS.PRODUCTION_RECORDS, normalized);
+        setToStorage(STORAGE_KEYS.PRODUCTIONS, normalized);
       }
 
       const savedCust = getFromStorage<Customer[] | null>(STORAGE_KEYS.CUSTOMERS, null);
@@ -186,9 +197,11 @@ export function BrickBookProvider({ children }: { children: ReactNode }) {
   }, []);
 
   // Save to storage when state changes
-  const saveProductions = (data: ProductionRecord[]) => {
+  const saveProductions = (data: ProductionRecord[]): boolean => {
     setProductions(data);
-    setToStorage(STORAGE_KEYS.PRODUCTIONS, data);
+    const okRecords = setToStorage(STORAGE_KEYS.PRODUCTION_RECORDS, data);
+    const okProds = setToStorage(STORAGE_KEYS.PRODUCTIONS, data);
+    return okRecords || okProds;
   };
 
   const saveCustomers = (data: Customer[]) => {
@@ -217,9 +230,34 @@ export function BrickBookProvider({ children }: { children: ReactNode }) {
     const cleanDate = input.date.trim();
     const cleanBatch = input.batchNumber.trim() || 'Shift 1';
 
+    // Future date validation guard: production date cannot be in the future
+    const todayStr = getTodayDateString();
+    if (cleanDate > todayStr) {
+      return {
+        success: false,
+        error: 'Production date cannot be in the future. Please select today or a past date.',
+      };
+    }
+
+    // Always fetch latest records directly from storage to prevent overwriting or state race conditions
+    const storedRecords =
+      getFromStorage<ProductionRecord[] | null>(STORAGE_KEYS.PRODUCTION_RECORDS, null) ||
+      getFromStorage<ProductionRecord[] | null>(STORAGE_KEYS.PRODUCTIONS, null) ||
+      [];
+
+    // Merge in-memory state with stored records to ensure no existing record is lost
+    const prodMap = new Map<string, ProductionRecord>();
+    productions.forEach((p) => {
+      if (p && p.id) prodMap.set(p.id, p);
+    });
+    storedRecords.forEach((p) => {
+      if (p && p.id) prodMap.set(p.id, p);
+    });
+    const currentRecords = Array.from(prodMap.values());
+
     // Duplicate Production Date Guard:
     // Prevents duplicate production run entries for the same brick category on the same date unless differentiated by batch number.
-    const isDuplicate = productions.some(
+    const isDuplicate = currentRecords.some(
       (p) =>
         p.date === cleanDate &&
         p.blockType === input.blockType &&
@@ -258,18 +296,34 @@ export function BrickBookProvider({ children }: { children: ReactNode }) {
       createdAt: new Date().toISOString(),
     };
 
-    const updated = [newRecord, ...productions];
-    saveProductions(updated);
+    // Prepend new record to existing records (never overwrites!)
+    const updated = [newRecord, ...currentRecords];
+
+    // Commit to localStorage under brickbook_production_records & sync React state
+    const isSaved = saveProductions(updated);
+    if (!isSaved) {
+      return {
+        success: false,
+        error: 'Failed to persist production record to storage. Please check storage permissions.',
+      };
+    }
+
     return { success: true };
   };
 
   const updateProduction = (id: string, input: Partial<ProductionRecord>) => {
-    const updated = productions.map((p) => (p.id === id ? { ...p, ...input } : p));
+    const storedRecords =
+      getFromStorage<ProductionRecord[] | null>(STORAGE_KEYS.PRODUCTION_RECORDS, null) ||
+      productions;
+    const updated = storedRecords.map((p) => (p.id === id ? { ...p, ...input } : p));
     saveProductions(updated);
   };
 
   const deleteProduction = (id: string) => {
-    const updated = productions.filter((p) => p.id !== id);
+    const storedRecords =
+      getFromStorage<ProductionRecord[] | null>(STORAGE_KEYS.PRODUCTION_RECORDS, null) ||
+      productions;
+    const updated = storedRecords.filter((p) => p.id !== id);
     saveProductions(updated);
   };
 
@@ -322,18 +376,26 @@ export function BrickBookProvider({ children }: { children: ReactNode }) {
       return { success: false, error: 'Customer not found.' };
     }
 
-    // Optional Kerala Vehicle Number Validation
-    let normalizedVehicle = '';
-    if (input.vehicleNumber && input.vehicleNumber.trim()) {
-      const vehicleValidation = validateKeralaVehicleNumber(input.vehicleNumber);
-      if (!vehicleValidation.isValid) {
-        return {
-          success: false,
-          error: vehicleValidation.errorMessage || 'Invalid Kerala vehicle registration number.',
-        };
-      }
-      normalizedVehicle = vehicleValidation.normalized;
+    const todayStr = getTodayDateString();
+    if (input.date && input.date > todayStr) {
+      return { success: false, error: 'Sale date cannot be in the future. Please select today or a past date.' };
     }
+
+    // Mandatory Kerala Vehicle Number Validation
+    if (!input.vehicleNumber || !input.vehicleNumber.trim()) {
+      return {
+        success: false,
+        error: 'Vehicle number is required. Please enter a valid Kerala vehicle number.',
+      };
+    }
+    const vehicleValidation = validateKeralaVehicleNumber(input.vehicleNumber);
+    if (!vehicleValidation.isValid) {
+      return {
+        success: false,
+        error: vehicleValidation.errorMessage || 'Invalid Kerala vehicle registration number.',
+      };
+    }
+    const normalizedVehicle = vehicleValidation.normalized;
 
     const quantity = Number(input.quantity);
     if (quantity <= 0) {

@@ -2,22 +2,16 @@
 
 import React, { useState } from 'react';
 import Link from 'next/link';
-import { Search, UserPlus, X } from 'lucide-react';
+import { Search, UserPlus } from 'lucide-react';
 import Header from '@/components/layout/Header';
 import CustomerCard from '@/components/customers/CustomerCard';
+import CustomerModal, { CustomerFormData } from '@/components/customers/CustomerModal';
 import { useBrickBook } from '@/context/BrickBookContext';
 
 export default function CustomersPage() {
   const { customers, addCustomer } = useBrickBook();
   const [searchQuery, setSearchQuery] = useState('');
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
-
-  // Add Customer Form State
-  const [name, setName] = useState('');
-  const [phone, setPhone] = useState('');
-  const [place, setPlace] = useState('');
-  const [openingBalance, setOpeningBalance] = useState<number | string>(0);
-  const [formError, setFormError] = useState<string | null>(null);
 
   // Filter customers by name, phone, or place
   const filteredCustomers = customers.filter((cust) => {
@@ -30,37 +24,20 @@ export default function CustomersPage() {
     );
   });
 
-  const handleAddSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    setFormError(null);
-
-    if (!name.trim()) {
-      setFormError('Please enter a customer name.');
-      return;
-    }
-    if (!phone.trim()) {
-      setFormError('Please enter a phone number.');
-      return;
-    }
-
+  const handleAddSubmit = (data: CustomerFormData) => {
     const res = addCustomer({
-      name: name.trim(),
-      phone: phone.trim(),
-      place: place.trim() || 'Kerala',
-      openingBalance: Number(openingBalance) || 0,
+      name: data.name,
+      phone: data.phone,
+      place: data.place,
+      openingBalance: 0,
     });
 
     if (!res.success) {
-      setFormError(res.error || 'Failed to add customer.');
-      return;
+      return { success: false, error: res.error || 'Failed to add customer.' };
     }
 
-    // Reset & close
-    setName('');
-    setPhone('');
-    setPlace('');
-    setOpeningBalance(0);
     setIsAddModalOpen(false);
+    return { success: true };
   };
 
   return (
@@ -131,103 +108,11 @@ export default function CustomersPage() {
       </div>
 
       {/* Add Customer Modal */}
-      {isAddModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-xs">
-          <div className="w-full max-w-[360px] overflow-hidden rounded-3xl bg-white shadow-2xl">
-            <div className="flex items-center justify-between bg-[#213547] px-5 py-4 text-white">
-              <div className="flex items-center space-x-2">
-                <UserPlus size={18} className="text-[#fcd34d]" />
-                <h3 className="font-semibold text-sm">Add New Customer</h3>
-              </div>
-              <button
-                onClick={() => setIsAddModalOpen(false)}
-                className="rounded-full p-1 text-white/80 hover:bg-white/10"
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            <form onSubmit={handleAddSubmit} className="p-5 space-y-3.5">
-              {formError && (
-                <div className="rounded-xl bg-red-50 p-2.5 text-xs font-medium text-red-600">
-                  {formError}
-                </div>
-              )}
-
-              <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1">
-                  Customer / Contractor Name *
-                </label>
-                <input
-                  type="text"
-                  id="input-customer-name"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="e.g. Vipin Builders"
-                  required
-                  className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-xs text-[#111827] focus:border-[#d97706] focus:outline-none"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1">
-                  Phone Number *
-                </label>
-                <input
-                  type="tel"
-                  id="input-customer-phone"
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
-                  placeholder="e.g. 9847123456"
-                  required
-                  className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-xs text-[#111827] focus:border-[#d97706] focus:outline-none"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1">
-                  Place / Delivery Site
-                </label>
-                <input
-                  type="text"
-                  id="input-customer-place"
-                  value={place}
-                  onChange={(e) => setPlace(e.target.value)}
-                  placeholder="e.g. Taliparamba, Kannur"
-                  className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-xs text-[#111827] focus:border-[#d97706] focus:outline-none"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1">
-                  Opening Balance (₹)
-                </label>
-                <input
-                  type="number"
-                  id="input-customer-opening-balance"
-                  value={openingBalance}
-                  onChange={(e) => setOpeningBalance(e.target.value)}
-                  placeholder="0"
-                  className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-xs font-bold text-[#111827] focus:border-[#d97706] focus:outline-none"
-                />
-                <p className="text-[10px] text-gray-400 mt-1">
-                  Enter existing unpaid balance or 0 for fresh accounts.
-                </p>
-              </div>
-
-              <div className="pt-2">
-                <button
-                  type="submit"
-                  id="btn-save-customer"
-                  className="w-full rounded-2xl bg-[#d97706] py-3 text-xs font-bold text-white shadow-md hover:bg-[#b45309] active:scale-[0.99]"
-                >
-                  Save Customer Account
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      <CustomerModal
+        isOpen={isAddModalOpen}
+        onClose={() => setIsAddModalOpen(false)}
+        onSubmit={handleAddSubmit}
+      />
     </div>
   );
 }

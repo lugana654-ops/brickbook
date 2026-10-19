@@ -3,6 +3,7 @@
 import React, { useState, useRef } from 'react';
 import { Search, Calendar, Pencil, X } from 'lucide-react';
 import Header from '@/components/layout/Header';
+import DatePickerModal from '@/components/ui/DatePickerModal';
 import {
   ProductionBatchCard,
   formatBatchCardDate,
@@ -14,7 +15,7 @@ import { ProductionRecord } from '@/types';
 export default function ProductionHistoryPage() {
   const { productions, deleteProduction, updateProduction } = useBrickBook();
   const [searchQuery, setSearchQuery] = useState('');
-  const dateInputRef = useRef<HTMLInputElement>(null);
+  const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
 
   // Edit Modal State
   const [editingBatch, setEditingBatch] = useState<ProductionRecord | null>(null);
@@ -47,26 +48,7 @@ export default function ProductionHistoryPage() {
     setSearchQuery('');
   };
 
-  const handleCalendarClick = () => {
-    if (dateInputRef.current) {
-      if ('showPicker' in HTMLInputElement.prototype) {
-        try {
-          dateInputRef.current.showPicker();
-        } catch {
-          dateInputRef.current.focus();
-        }
-      } else {
-        dateInputRef.current.focus();
-      }
-    }
-  };
 
-  const handleDateSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const val = e.target.value;
-    if (val) {
-      setSearchQuery(formatBatchCardDate(val));
-    }
-  };
 
   const handleDelete = (id: string, label: string) => {
     if (window.confirm(`Delete production batch for ${label}?`)) {
@@ -130,18 +112,20 @@ export default function ProductionHistoryPage() {
           )}
           <button
             type="button"
-            onClick={handleCalendarClick}
-            className="text-gray-400 hover:text-gray-600 transition-colors shrink-0 ml-1"
+            onClick={() => setIsDatePickerOpen(true)}
+            className="text-gray-400 hover:text-gray-600 transition-colors shrink-0 ml-1 cursor-pointer"
             title="Pick date"
           >
             <Calendar size={18} />
           </button>
-          <input
-            type="date"
-            ref={dateInputRef}
-            onChange={handleDateSelected}
-            className="sr-only"
-            aria-hidden="true"
+
+          <DatePickerModal
+            isOpen={isDatePickerOpen}
+            title="Filter by date"
+            onChange={(newDate) => {
+              setSearchQuery(formatBatchCardDate(newDate));
+            }}
+            onClose={() => setIsDatePickerOpen(false)}
           />
         </div>
 

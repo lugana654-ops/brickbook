@@ -200,7 +200,7 @@ export function generateDispatchSlipPDF(
         ? '4-inch Solid Concrete Block'
         : dispatch.blockType === '6inch'
         ? '6-inch Solid Concrete Block'
-        : '8-inch Hollow Block',
+        : 'Solid Concrete Block',
       `${dispatch.quantity} Pcs`,
       `Rs. ${dispatch.unitPrice.toFixed(2)}`,
       `Rs. ${dispatch.totalAmount.toLocaleString('en-IN')}`,
