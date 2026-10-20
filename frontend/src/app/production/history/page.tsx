@@ -11,10 +11,57 @@ import {
 } from '@/components/production/ProductionBatchCard';
 import { useBrickBook } from '@/context/BrickBookContext';
 import { ProductionRecord } from '@/types';
+import { isProductionEditable } from '@/lib/productionLimits';
+import { getTodayDateString } from '@/lib/curingCalculator';
+
+// Parses manual date input into YYYY-MM-DD to detect future dates
+function parseUserDateInput(input: string): string | null {
+  const trimmed = input.trim();
+  if (!trimmed) return null;
+
+  // Pattern 1: YYYY-MM-DD or YYYY/MM/DD
+  const ymdMatch = trimmed.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/);
+  if (ymdMatch) {
+    const y = parseInt(ymdMatch[1], 10);
+    const m = parseInt(ymdMatch[2], 10);
+    const d = parseInt(ymdMatch[3], 10);
+    if (m >= 1 && m <= 12 && d >= 1 && d <= 31) {
+      return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    }
+  }
+
+  // Pattern 2: D-M-YYYY or DD-MM-YYYY or D/M/YYYY or DD/MM/YYYY
+  const dmyMatch = trimmed.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/);
+  if (dmyMatch) {
+    const d = parseInt(dmyMatch[1], 10);
+    const m = parseInt(dmyMatch[2], 10);
+    const y = parseInt(dmyMatch[3], 10);
+    if (m >= 1 && m <= 12 && d >= 1 && d <= 31) {
+      return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    }
+  }
+
+  // Pattern 3: e.g. "25 Oct 2026", "25 October 2026", "Oct 25, 2026"
+  const textDateMatch =
+    trimmed.match(/^(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})$/) ||
+    trimmed.match(/^([A-Za-z]+)\s+(\d{1,2}),?\s+(\d{4})$/);
+  if (textDateMatch) {
+    const parsed = new Date(trimmed);
+    if (!isNaN(parsed.getTime())) {
+      const y = parsed.getFullYear();
+      const m = parsed.getMonth() + 1;
+      const d = parsed.getDate();
+      return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    }
+  }
+
+  return null;
+}
 
 export default function ProductionHistoryPage() {
   const { productions, deleteProduction, updateProduction } = useBrickBook();
   const [searchQuery, setSearchQuery] = useState('');
+  const [dateFilterError, setDateFilterError] = useState<string | null>(null);
   const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
 
   // Edit Modal State
@@ -23,8 +70,21 @@ export default function ProductionHistoryPage() {
   const [editRemaining, setEditRemaining] = useState<string>('');
   const [editNotes, setEditNotes] = useState<string>('');
 
+  const handleSearchChange = (value: string) => {
+    setSearchQuery(value);
+    const parsedDate = parseUserDateInput(value);
+    const today = getTodayDateString();
+    if (parsedDate && parsedDate > today) {
+      setDateFilterError('Future dates cannot be searched.');
+    } else {
+      setDateFilterError(null);
+    }
+  };
+
   // Filter dynamic productions only - no dummy values
   const filteredBatches = productions.filter((batch) => {
+    // If a future date was entered, do not run search or apply filter
+    if (dateFilterError) return true;
     if (!searchQuery.trim()) return true;
     const q = searchQuery.toLowerCase().trim();
     const label = formatBlockNominal(batch.blockType).toLowerCase();
@@ -46,17 +106,31 @@ export default function ProductionHistoryPage() {
 
   const handleRefresh = () => {
     setSearchQuery('');
+    setDateFilterError(null);
   };
 
 
 
   const handleDelete = (id: string, label: string) => {
+    const target = productions.find((p) => p.id === id);
+    if (!target || !isProductionEditable(target)) {
+      alert('This production record cannot be deleted because the 24-hour window has expired.');
+      return;
+    }
+
     if (window.confirm(`Delete production batch for ${label}?`)) {
-      deleteProduction(id);
+      const res = deleteProduction(id);
+      if (res && !res.success && res.error) {
+        alert(res.error);
+      }
     }
   };
 
   const openEditModal = (batch: ProductionRecord) => {
+    if (!isProductionEditable(batch)) {
+      alert('This production record cannot be edited because the 24-hour window has expired.');
+      return;
+    }
     setEditingBatch(batch);
     setEditProduced(String(batch.producedQuantity));
     setEditRemaining(String(batch.remainingQuantity ?? batch.producedQuantity));
@@ -67,15 +141,25 @@ export default function ProductionHistoryPage() {
     e.preventDefault();
     if (!editingBatch) return;
 
+    if (!isProductionEditable(editingBatch)) {
+      alert('This production record cannot be edited because the 24-hour window has expired.');
+      setEditingBatch(null);
+      return;
+    }
+
     const produced = Number(editProduced) || 0;
     const remaining = Number(editRemaining) || 0;
 
-    updateProduction(editingBatch.id, {
+    const res = updateProduction(editingBatch.id, {
       producedQuantity: produced,
       remainingQuantity: remaining,
       netQuantity: produced,
       notes: editNotes.trim() || undefined,
     });
+
+    if (res && !res.success && res.error) {
+      alert(res.error);
+    }
 
     setEditingBatch(null);
   };
@@ -97,13 +181,16 @@ export default function ProductionHistoryPage() {
           <input
             type="text"
             value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
+            onChange={(e) => handleSearchChange(e.target.value)}
             placeholder="Search date or brick type"
             className="w-full bg-transparent text-sm text-[#111827] placeholder-gray-400 focus:outline-none"
           />
           {searchQuery && (
             <button
-              onClick={() => setSearchQuery('')}
+              onClick={() => {
+                setSearchQuery('');
+                setDateFilterError(null);
+              }}
               className="mr-1.5 text-gray-400 hover:text-gray-600"
               title="Clear search"
             >
@@ -122,12 +209,42 @@ export default function ProductionHistoryPage() {
           <DatePickerModal
             isOpen={isDatePickerOpen}
             title="Filter by date"
+            maxDate={getTodayDateString()}
+            futureDateErrorMessage="Future dates cannot be searched."
             onChange={(newDate) => {
+              const today = getTodayDateString();
+              if (newDate > today) {
+                setDateFilterError('Future dates cannot be searched.');
+                return;
+              }
+              setDateFilterError(null);
               setSearchQuery(formatBatchCardDate(newDate));
             }}
             onClose={() => setIsDatePickerOpen(false)}
           />
         </div>
+
+        {/* Future date filter warning message */}
+        {dateFilterError && (
+          <div
+            id="future-date-filter-error"
+            role="alert"
+            className="rounded-2xl bg-red-50 border border-red-200/80 px-3.5 py-2.5 text-xs font-semibold text-red-700 flex items-center justify-between"
+          >
+            <span>{dateFilterError}</span>
+            <button
+              type="button"
+              onClick={() => {
+                setDateFilterError(null);
+                setSearchQuery('');
+              }}
+              className="text-red-400 hover:text-red-600 transition-colors cursor-pointer p-0.5 ml-2"
+              aria-label="Dismiss error"
+            >
+              <X size={14} />
+            </button>
+          </div>
+        )}
 
         {/* Records Count matching screenshot */}
         <div className="text-xs text-gray-500 font-medium px-1">

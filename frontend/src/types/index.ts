@@ -50,7 +50,7 @@ export interface ProductionRecord {
   status: CuringStatus;
   daysRemaining: number;
   notes?: string;
-  createdAt: string;
+  createdAt?: string;
 }
 
 export interface Customer {

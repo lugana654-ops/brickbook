@@ -7,6 +7,12 @@ import DatePickerModal from '@/components/ui/DatePickerModal';
 import { useBrickBook } from '@/context/BrickBookContext';
 import { BlockType } from '@/types';
 import { addDaysToDate, getTodayDateString } from '@/lib/curingCalculator';
+import CustomSelect, { CustomSelectOption } from '@/components/ui/CustomSelect';
+
+const BRICK_TYPE_OPTIONS: CustomSelectOption<BlockType>[] = [
+  { value: '4inch', label: '4-inch Solid Concrete Block' },
+  { value: '6inch', label: '6-inch Solid Concrete Block' },
+];
 
 // Formats YYYY-MM-DD to D-M-YYYY without leading zero to match screenshot (e.g. 21-9-2026, 4-10-2026)
 function formatCustomDate(dateStr: string): string {
@@ -98,6 +104,11 @@ export default function AddProductionPage() {
       return;
     }
 
+    // Reset form to initial state on successful save
+    setBlockType('');
+    setSteps('');
+    setDate(getTodayDateString());
+
     setSuccessMessage('Production saved successfully!');
     if (successTimeoutRef.current) {
       clearTimeout(successTimeoutRef.current);
@@ -148,34 +159,21 @@ export default function AddProductionPage() {
             )}
 
             {/* 1. Brick Type Dropdown */}
-            <div className="relative rounded-2xl bg-white border border-gray-300 shadow-xs h-14 flex items-center px-4">
-              <select
-                value={blockType}
-                onChange={(e) => {
-                  setBlockType(e.target.value as BlockType);
-                  setErrorMessage(null);
-                  setSuccessMessage(null);
-                }}
-                className={`w-full h-full bg-transparent text-[15px] font-medium appearance-none focus:outline-none cursor-pointer pr-8 ${
-                  blockType ? 'text-gray-800' : 'text-gray-500'
-                }`}
-              >
-                <option value="" disabled className="text-gray-400">
-                  Select Brick Type
-                </option>
-                <option value="4inch" className="text-gray-800">
-                  4-inch Solid Concrete Block
-                </option>
-                <option value="6inch" className="text-gray-800">
-                  6-inch Solid Concrete Block
-                </option>
-              </select>
-              <div className="pointer-events-none absolute right-4 flex items-center text-gray-400">
-                <svg className="h-4 w-4 fill-current" viewBox="0 0 20 20">
-                  <path d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" />
-                </svg>
-              </div>
-            </div>
+            <CustomSelect<BlockType>
+              id="select-brick-type"
+              value={blockType}
+              onChange={(val) => {
+                setBlockType(val);
+                setErrorMessage(null);
+                setSuccessMessage(null);
+              }}
+              options={BRICK_TYPE_OPTIONS}
+              placeholder="Select Brick Type"
+              heightClass="h-14"
+              textSizeClass="text-[15px]"
+              paddingClass="px-4"
+              ariaLabel="Select Brick Type"
+            />
 
             {/* 2. Number of Steps Input */}
             <div className="rounded-2xl bg-white border border-gray-300 shadow-xs h-14 flex items-center px-4">

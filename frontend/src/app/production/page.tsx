@@ -36,7 +36,7 @@ export default function ProductionHubPage() {
 
             <div className="flex-1 min-w-0 pr-2">
               <h3 className="text-base font-bold text-[#1a2b3c] group-hover:text-[#d97706] transition-colors">
-                Add Today Production
+                Add Production
               </h3>
               <p className="text-xs text-gray-500 mt-0.5 leading-relaxed">
                 Enter brick production for today or past dates

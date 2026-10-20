@@ -18,6 +18,12 @@ import { getTodayDateString, formatFriendlyDate } from '@/lib/curingCalculator';
 import { validateKeralaVehicleNumber, formatKeralaPlateAsYouType } from '@/lib/vehicleValidator';
 import { allocateFIFODispatch } from '@/lib/fifoEngine';
 import { generateDispatchSlipPDF } from '@/lib/pdfGenerator';
+import CustomSelect, { CustomSelectOption } from '@/components/ui/CustomSelect';
+
+const SALE_BRICK_OPTIONS: CustomSelectOption<BlockType>[] = [
+  { value: '4inch', label: '4-inch' },
+  { value: '6inch', label: '6-inch' },
+];
 
 export default function AddSalePage({
   params,
@@ -235,17 +241,17 @@ export default function AddSalePage({
               <label className="block text-xs font-semibold text-gray-700 mb-1">
                 Brick Type *
               </label>
-              <div className="relative rounded-2xl bg-white border border-gray-300 shadow-xs h-12 flex items-center px-3.5">
-                <select
-                  id="select-brick-type"
-                  value={blockType}
-                  onChange={(e) => handleBlockTypeChange(e.target.value as BlockType)}
-                  className="w-full h-full bg-transparent text-xs font-semibold text-[#111827] focus:outline-none cursor-pointer"
-                >
-                  <option value="4inch">4-inch</option>
-                  <option value="6inch">6-inch</option>
-                </select>
-              </div>
+              <CustomSelect<BlockType>
+                id="select-brick-type"
+                value={blockType}
+                onChange={(val) => handleBlockTypeChange(val)}
+                options={SALE_BRICK_OPTIONS}
+                placeholder="Select Brick Type"
+                heightClass="h-12"
+                textSizeClass="text-xs font-semibold"
+                paddingClass="px-3.5"
+                ariaLabel="Select Brick Type"
+              />
             </div>
 
             {/* Field 2: Sale Date with calendar icon */}

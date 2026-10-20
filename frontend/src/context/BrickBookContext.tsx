@@ -25,6 +25,7 @@ import {
   normalizeProductionRecords,
 } from '@/lib/fifoEngine';
 import { validateKeralaVehicleNumber } from '@/lib/vehicleValidator';
+import { isProductionEditable } from '@/lib/productionLimits';
 
 import {
   STORAGE_KEYS,
@@ -99,8 +100,8 @@ interface BrickBookContextType {
 
   // Actions
   addProduction: (input: AddProductionInput) => { success: boolean; error?: string };
-  updateProduction: (id: string, input: Partial<ProductionRecord>) => void;
-  deleteProduction: (id: string) => void;
+  updateProduction: (id: string, input: Partial<ProductionRecord>) => { success: boolean; error?: string };
+  deleteProduction: (id: string) => { success: boolean; error?: string };
 
   addCustomer: (input: AddCustomerInput) => { success: boolean; customer?: Customer; error?: string };
   updateCustomer: (id: string, input: Partial<Customer>) => void;
@@ -127,6 +128,31 @@ export function BrickBookProvider({ children }: { children: ReactNode }) {
   const [dispatches, setDispatches] = useState<DispatchRecord[]>([]);
   const [payments, setPayments] = useState<PaymentRecord[]>([]);
   const [isLoaded, setIsLoaded] = useState(false);
+  const [currentDate, setCurrentDate] = useState<string>(getTodayDateString());
+
+  // Date synchronization listener: refreshes derived statistics and curing readiness as local date advances
+  useEffect(() => {
+    const checkDate = () => {
+      const today = getTodayDateString();
+      setCurrentDate((prev) => {
+        if (prev !== today) {
+          setProductions((prevBatches) => normalizeProductionRecords(prevBatches, today));
+          return today;
+        }
+        return prev;
+      });
+    };
+
+    const interval = setInterval(checkDate, 15000);
+    window.addEventListener('focus', checkDate);
+    document.addEventListener('visibilitychange', checkDate);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('focus', checkDate);
+      document.removeEventListener('visibilitychange', checkDate);
+    };
+  }, []);
 
   // Load state from localStorage on initial mount with dummy data purge guard
   useEffect(() => {
@@ -265,10 +291,19 @@ export function BrickBookProvider({ children }: { children: ReactNode }) {
     );
 
     if (isDuplicate) {
-      const typeLabel = BLOCK_CONFIGS[input.blockType].name;
+      const blockLabel =
+        input.blockType === '4inch'
+          ? '4-inch'
+          : input.blockType === '6inch'
+          ? '6-inch'
+          : input.blockType === '8inch'
+          ? '8-inch'
+          : input.blockType;
+      const dateLabel = cleanDate === todayStr ? 'today' : cleanDate;
+
       return {
         success: false,
-        error: `A production entry for ${typeLabel} on ${cleanDate} (${cleanBatch}) already exists. Please specify a new batch number or edit the existing log.`,
+        error: `${blockLabel} production for ${dateLabel} is already added. Please choose a different date or edit the existing entry.`,
       };
     }
 
@@ -311,20 +346,58 @@ export function BrickBookProvider({ children }: { children: ReactNode }) {
     return { success: true };
   };
 
-  const updateProduction = (id: string, input: Partial<ProductionRecord>) => {
+  const updateProduction = (id: string, input: Partial<ProductionRecord>): { success: boolean; error?: string } => {
     const storedRecords =
       getFromStorage<ProductionRecord[] | null>(STORAGE_KEYS.PRODUCTION_RECORDS, null) ||
       productions;
-    const updated = storedRecords.map((p) => (p.id === id ? { ...p, ...input } : p));
+    const target = storedRecords.find((p) => p.id === id);
+    if (!target) {
+      return { success: false, error: 'Production record not found.' };
+    }
+
+    if (!isProductionEditable(target)) {
+      return {
+        success: false,
+        error: 'Production records can only be edited within 24 hours of creation.',
+      };
+    }
+
+    // Preserve original createdAt strictly so editing never resets or extends the 24-hour deadline
+    const updated = storedRecords.map((p) => {
+      if (p.id === id) {
+        const { createdAt: _ignored, ...allowedInput } = input;
+        return {
+          ...p,
+          ...allowedInput,
+          createdAt: p.createdAt,
+        };
+      }
+      return p;
+    });
+
     saveProductions(updated);
+    return { success: true };
   };
 
-  const deleteProduction = (id: string) => {
+  const deleteProduction = (id: string): { success: boolean; error?: string } => {
     const storedRecords =
       getFromStorage<ProductionRecord[] | null>(STORAGE_KEYS.PRODUCTION_RECORDS, null) ||
       productions;
+    const target = storedRecords.find((p) => p.id === id);
+    if (!target) {
+      return { success: false, error: 'Production record not found.' };
+    }
+
+    if (!isProductionEditable(target)) {
+      return {
+        success: false,
+        error: 'Production records can only be deleted within 24 hours of creation.',
+      };
+    }
+
     const updated = storedRecords.filter((p) => p.id !== id);
     saveProductions(updated);
+    return { success: true };
   };
 
   // 2. Add Customer
@@ -544,9 +617,9 @@ export function BrickBookProvider({ children }: { children: ReactNode }) {
     return calculateCustomerLedger(customer, dispatches, payments);
   };
 
-  // 6. Stock Summary
+  // 6. Stock Summary (Live, date-aware calculation source)
   const getStockSummary = (blockType: BlockType): StockSummary => {
-    return calculateStockSummary(productions, blockType);
+    return calculateStockSummary(productions, blockType, currentDate);
   };
 
   const resetAllData = () => {
