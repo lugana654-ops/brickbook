@@ -12,9 +12,10 @@ import {
   Package,
 } from 'lucide-react';
 import { useBrickBook } from '@/context/BrickBookContext';
+import DatePickerModal from '@/components/ui/DatePickerModal';
 import { BlockType, BLOCK_CONFIGS, PaymentMode } from '@/types';
-import { getTodayDateString } from '@/lib/curingCalculator';
-import { validateKeralaVehicleNumber } from '@/lib/vehicleValidator';
+import { getTodayDateString, formatFriendlyDate } from '@/lib/curingCalculator';
+import { validateKeralaVehicleNumber, formatKeralaPlateAsYouType } from '@/lib/vehicleValidator';
 import { allocateFIFODispatch } from '@/lib/fifoEngine';
 import { generateDispatchSlipPDF } from '@/lib/pdfGenerator';
 
@@ -49,6 +50,7 @@ export default function AddSalePage({
 
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
 
   if (!customer) {
     return (
@@ -87,10 +89,10 @@ export default function AddSalePage({
   const curingLocked = fifoSimulation.curingStock;
   const availableTotalStock = readyStock + curingLocked;
 
-  // Optional vehicle plate validation
+  // Mandatory vehicle plate validation
   const vehicleValidation = vehicleNumber.trim()
     ? validateKeralaVehicleNumber(vehicleNumber)
-    : { isValid: true, normalized: '' };
+    : { isValid: false, errorMessage: 'Vehicle number is required.', normalized: '' };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -98,6 +100,12 @@ export default function AddSalePage({
 
     if (reqQty <= 0) {
       setErrorMessage('Please enter a valid brick quantity.');
+      return;
+    }
+
+    const todayStr = getTodayDateString();
+    if (date > todayStr) {
+      setErrorMessage('Sale date cannot be in the future. Please select today or a past date.');
       return;
     }
 
@@ -117,9 +125,14 @@ export default function AddSalePage({
       return;
     }
 
-    if (vehicleNumber.trim() && !vehicleValidation.isValid) {
+    if (!vehicleNumber.trim()) {
+      setErrorMessage('Vehicle number is required. Please enter a valid Kerala vehicle registration number.');
+      return;
+    }
+
+    if (!vehicleValidation.isValid) {
       setErrorMessage(
-        vehicleValidation.errorMessage || 'Invalid Kerala vehicle registration number.'
+        vehicleValidation.errorMessage || 'Invalid Kerala vehicle registration number (e.g. KL-07-AB-1234).'
       );
       return;
     }
@@ -135,7 +148,7 @@ export default function AddSalePage({
       discount: disc,
       amountReceived: received,
       paymentMode,
-      vehicleNumber: vehicleNumber.trim() ? vehicleValidation.normalized : undefined,
+      vehicleNumber: vehicleValidation.normalized,
     });
 
     if (!res.success) {
@@ -229,9 +242,8 @@ export default function AddSalePage({
                   onChange={(e) => handleBlockTypeChange(e.target.value as BlockType)}
                   className="w-full h-full bg-transparent text-xs font-semibold text-[#111827] focus:outline-none cursor-pointer"
                 >
-                  <option value="4inch">4-inch Solid Concrete Block (32 ₹/blk)</option>
-                  <option value="6inch">6-inch Solid Concrete Block (48 ₹/blk)</option>
-                  <option value="8inch">8-inch Hollow Block (62 ₹/blk)</option>
+                  <option value="4inch">4-inch</option>
+                  <option value="6inch">6-inch</option>
                 </select>
               </div>
             </div>
@@ -241,17 +253,29 @@ export default function AddSalePage({
               <label className="block text-xs font-semibold text-gray-700 mb-1">
                 Sale Date *
               </label>
-              <div className="relative rounded-2xl bg-white border border-gray-300 shadow-xs h-12 flex items-center px-3.5">
-                <Calendar size={17} className="text-gray-400 mr-2 shrink-0" />
-                <input
-                  type="date"
-                  id="input-sale-date"
-                  value={date}
-                  onChange={(e) => setDate(e.target.value)}
-                  required
-                  className="w-full h-full bg-transparent text-xs font-semibold text-[#111827] focus:outline-none"
-                />
+              <div
+                onClick={() => setIsDatePickerOpen(true)}
+                className="relative rounded-2xl bg-white border border-gray-300 shadow-xs h-12 flex items-center justify-between px-3.5 cursor-pointer hover:border-amber-300 transition-colors"
+              >
+                <div className="flex items-center space-x-2">
+                  <Calendar size={17} className="text-gray-400 shrink-0" />
+                  <span className="text-xs font-semibold text-[#111827]">
+                    {date ? formatFriendlyDate(date) : 'Select date'}
+                  </span>
+                </div>
               </div>
+
+              <DatePickerModal
+                isOpen={isDatePickerOpen}
+                value={date}
+                title="Select sale date"
+                maxDate={getTodayDateString()}
+                onChange={(newDate) => {
+                  setDate(newDate);
+                  setErrorMessage(null);
+                }}
+                onClose={() => setIsDatePickerOpen(false)}
+              />
             </div>
 
             {/* Field 3: Total Bricks and Rate/Brick (₹) side by side */}
@@ -358,16 +382,22 @@ export default function AddSalePage({
               </div>
             </div>
 
-            {/* Field 6: Vehicle Number (Optional) */}
+            {/* Field 6: Vehicle Number (Mandatory) */}
             <div>
               <div className="flex items-center justify-between mb-1">
                 <label className="block text-xs font-semibold text-gray-700">
-                  Vehicle Number (Optional)
+                  Vehicle Number *
                 </label>
-                {vehicleNumber.trim() && vehicleValidation.isValid && (
-                  <span className="rounded bg-emerald-100 px-1.5 py-0.2 text-[9px] font-bold text-[#059669]">
-                    Valid MVD
-                  </span>
+                {vehicleNumber.trim() && (
+                  vehicleValidation.isValid ? (
+                    <span className="rounded bg-emerald-100 px-1.5 py-0.2 text-[9px] font-bold text-[#059669]">
+                      Valid MVD
+                    </span>
+                  ) : (
+                    <span className="rounded bg-red-100 px-1.5 py-0.2 text-[9px] font-bold text-red-600">
+                      Invalid MVD
+                    </span>
+                  )
                 )}
               </div>
               <div className="rounded-2xl bg-white border border-gray-300 shadow-xs h-12 flex items-center px-3.5">
@@ -377,10 +407,12 @@ export default function AddSalePage({
                   id="input-vehicle-number"
                   value={vehicleNumber}
                   onChange={(e) => {
-                    setVehicleNumber(e.target.value);
+                    const formatted = formatKeralaPlateAsYouType(e.target.value);
+                    setVehicleNumber(formatted);
                     setErrorMessage(null);
                   }}
-                  placeholder="e.g. KL-07-AB-1234 or KL 13 9999"
+                  placeholder="KL-07-A-1234"
+                  required
                   className="w-full bg-transparent text-xs font-bold uppercase tracking-wider text-[#111827] focus:outline-none placeholder-gray-400"
                 />
               </div>
@@ -406,20 +438,6 @@ export default function AddSalePage({
                 <span className="text-sm font-bold text-[#1a2b3c]">Total Bill</span>
                 <span className="text-lg font-bold text-[#d97706]">
                   ₹ {totalBill.toLocaleString('en-IN')}
-                </span>
-              </div>
-
-              {received > 0 && (
-                <div className="flex items-center justify-between text-xs text-[#059669] pt-0.5">
-                  <span>Amount Paid ({paymentMode})</span>
-                  <span className="font-bold">- ₹ {received.toLocaleString('en-IN')}</span>
-                </div>
-              )}
-
-              <div className="flex items-center justify-between text-[11px] text-gray-500 border-t border-dashed border-gray-200 pt-1.5">
-                <span>Net Due Added to Ledger</span>
-                <span className="font-bold text-[#111827]">
-                  ₹ {balanceDue.toLocaleString('en-IN')}
                 </span>
               </div>
             </div>

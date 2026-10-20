@@ -40,6 +40,11 @@ const TABS: TabItem[] = [
 export default function BottomNav() {
   const pathname = usePathname();
 
+  // Hide BottomNav on customer sub-pages (e.g. customer profile, add-sale)
+  if (pathname.startsWith('/customers/')) {
+    return null;
+  }
+
   return (
     <nav
       aria-label="Bottom Navigation"

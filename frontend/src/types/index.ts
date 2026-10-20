@@ -11,23 +11,23 @@ export interface BlockConfig {
 export const BLOCK_CONFIGS: Record<BlockType, BlockConfig> = {
   '4inch': {
     id: '4inch',
-    name: '4-inch Solid Block',
+    name: '4-inch Solid Concrete Block',
     nominalSize: '4" Solid',
     defaultMultiplier: 80,
     defaultUnitPrice: 32,
   },
   '6inch': {
     id: '6inch',
-    name: '6-inch Solid Block',
+    name: '6-inch Solid Concrete Block',
     nominalSize: '6" Solid',
-    defaultMultiplier: 52,
+    defaultMultiplier: 50,
     defaultUnitPrice: 48,
   },
   '8inch': {
     id: '8inch',
-    name: '8-inch Hollow Block',
-    nominalSize: '8" Hollow',
-    defaultMultiplier: 42,
+    name: '8-inch Solid Block',
+    nominalSize: '8" Solid',
+    defaultMultiplier: 40,
     defaultUnitPrice: 62,
   },
 };

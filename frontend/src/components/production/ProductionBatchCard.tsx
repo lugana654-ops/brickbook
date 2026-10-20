@@ -23,17 +23,16 @@ export function formatBatchCardDate(dateStr: string): string {
   return dateStr;
 }
 
-// Calculates press steps: 8 bricks/step for 4", 5 bricks/step for 6", 4 for 8"
+// Calculates press steps: 8 bricks/step for 4", 5 bricks/step for 6"
 export function calculatePressSteps(batch: ProductionRecord): number {
   const blocksPerStep = batch.blockType === '4inch' ? 8 : batch.blockType === '6inch' ? 5 : 4;
   return Math.round(batch.producedQuantity / blocksPerStep);
 }
 
-// Formats block title to match specification ("4 inch", "6 inch", "8 inch")
+// Formats block title to match specification ("4 inch", "6 inch")
 export function formatBlockNominal(type: string): string {
   if (type === '4inch') return '4 inch';
   if (type === '6inch') return '6 inch';
-  if (type === '8inch') return '8 inch';
   return type.replace('inch', ' inch');
 }
 

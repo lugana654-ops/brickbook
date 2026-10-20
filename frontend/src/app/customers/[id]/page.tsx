@@ -10,7 +10,10 @@ import {
   MapPin,
   Pencil,
   FileDown,
+  FileText,
   Plus,
+  PlusCircle,
+  Box,
   Calendar,
   CreditCard,
   Truck,
@@ -22,10 +25,39 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import PaymentModeBadge from '@/components/customers/PaymentModeBadge';
+import CustomerModal, { CustomerFormData } from '@/components/customers/CustomerModal';
+import DatePickerModal from '@/components/ui/DatePickerModal';
 import { useBrickBook } from '@/context/BrickBookContext';
 import { formatFriendlyDate, getTodayDateString } from '@/lib/curingCalculator';
 import { generateCustomerStatementPDF } from '@/lib/pdfGenerator';
+import { validateKeralaVehicleNumber, formatKeralaPlateAsYouType } from '@/lib/vehicleValidator';
 import { BlockType, BLOCK_CONFIGS, DispatchRecord, PaymentMode } from '@/types';
+
+// Formats YYYY-MM-DD to D-M-YYYY without leading zero to match screenshot (e.g. 29-9-2026)
+function formatCustomDate(dateStr: string): string {
+  if (!dateStr) return '';
+  const parts = dateStr.split('-');
+  if (parts.length === 3) {
+    const y = parts[0];
+    const m = parseInt(parts[1], 10);
+    const d = parseInt(parts[2], 10);
+    if (!isNaN(m) && !isNaN(d)) {
+      return `${d}-${m}-${y}`;
+    }
+  }
+  const dateObj = new Date(dateStr);
+  if (!isNaN(dateObj.getTime())) {
+    return `${dateObj.getDate()}-${dateObj.getMonth() + 1}-${dateObj.getFullYear()}`;
+  }
+  return dateStr;
+}
+
+function formatBlockTypeDisplay(blockType: string): string {
+  if (blockType === '4inch') return '4 inch';
+  if (blockType === '6inch') return '6 inch';
+  const conf = BLOCK_CONFIGS[blockType as BlockType];
+  return conf ? conf.nominalSize : blockType.replace('inch', ' inch');
+}
 
 type MainTab = 'SALES' | 'BALANCE';
 type LedgerFilter = 'ALL' | 'DISPATCHES' | 'PAYMENTS';
@@ -56,9 +88,6 @@ export default function CustomerProfilePage({
 
   // Edit Customer Modal State
   const [isEditCustomerOpen, setIsEditCustomerOpen] = useState(false);
-  const [editName, setEditName] = useState('');
-  const [editPhone, setEditPhone] = useState('');
-  const [editPlace, setEditPlace] = useState('');
 
   // Record Payment Modal State
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
@@ -79,6 +108,25 @@ export default function CustomerProfilePage({
   const [editSaleDiscount, setEditSaleDiscount] = useState<number | string>('');
   const [editSaleVehicle, setEditSaleVehicle] = useState('');
   const [editSaleNotes, setEditSaleNotes] = useState('');
+  const [editSaleError, setEditSaleError] = useState<string | null>(null);
+
+  // Date Picker Modals State
+  const [isEditSaleDateOpen, setIsEditSaleDateOpen] = useState(false);
+  const [isPayDateOpen, setIsPayDateOpen] = useState(false);
+
+  // Generate Statement / Bill Modal State
+  const [isBillModalOpen, setIsBillModalOpen] = useState(false);
+  const [billFromDate, setBillFromDate] = useState<string>(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 7);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  });
+  const [billToDate, setBillToDate] = useState<string>(getTodayDateString());
+  const [isBillFromDateOpen, setIsBillFromDateOpen] = useState(false);
+  const [isBillToDateOpen, setIsBillToDateOpen] = useState(false);
 
   if (!customer) {
     return (
@@ -134,27 +182,33 @@ export default function CustomerProfilePage({
 
   // Open Edit Customer Modal
   const handleOpenEditCustomer = () => {
-    setEditName(customer.name);
-    setEditPhone(customer.phone);
-    setEditPlace(customer.place || '');
     setIsEditCustomerOpen(true);
   };
 
-  // Save Edit Customer
-  const handleSaveCustomer = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!editName.trim()) return;
+  // Save Edit Customer Updates
+  const handleUpdateCustomer = (data: CustomerFormData) => {
     updateCustomer(customer.id, {
-      name: editName.trim(),
-      phone: editPhone.trim(),
-      place: editPlace.trim(),
+      name: data.name,
+      phone: data.phone,
+      place: data.place,
     });
     setIsEditCustomerOpen(false);
+    return { success: true };
   };
 
   // Handle PDF Statement
   const handleDownloadPDF = () => {
-    generateCustomerStatementPDF(customer, ledger, user);
+    setIsBillModalOpen(true);
+  };
+
+  const handleGeneratePDFFromModal = () => {
+    const filteredLedger = ledger.filter((entry) => {
+      if (billFromDate && entry.date < billFromDate) return false;
+      if (billToDate && entry.date > billToDate) return false;
+      return true;
+    });
+    generateCustomerStatementPDF(customer, filteredLedger, user);
+    setIsBillModalOpen(false);
   };
 
   // Open Edit Sale Modal
@@ -166,12 +220,34 @@ export default function CustomerProfilePage({
     setEditSaleDiscount(sale.discount || 0);
     setEditSaleVehicle(sale.vehicleNumber || '');
     setEditSaleNotes(sale.notes || '');
+    setEditSaleError(null);
   };
 
   // Save Edit Sale
   const handleSaveSale = (e: React.FormEvent) => {
     e.preventDefault();
+    setEditSaleError(null);
     if (!editingSale) return;
+
+    const todayStr = getTodayDateString();
+    if (editSaleDate > todayStr) {
+      setEditSaleError('Sale date cannot be in the future. Please select today or a past date.');
+      return;
+    }
+
+    if (!editSaleVehicle.trim()) {
+      setEditSaleError('Vehicle number is required. Please enter a valid Kerala vehicle registration number.');
+      return;
+    }
+
+    const vehicleValidation = validateKeralaVehicleNumber(editSaleVehicle);
+    if (!vehicleValidation.isValid) {
+      setEditSaleError(
+        vehicleValidation.errorMessage || 'Invalid Kerala vehicle registration number (e.g. KL-07-AB-1234).'
+      );
+      return;
+    }
+
     const qty = Number(editSaleQty) || 0;
     const price = Number(editSalePrice) || 0;
     const disc = Number(editSaleDiscount) || 0;
@@ -184,7 +260,7 @@ export default function CustomerProfilePage({
       unitPrice: price,
       discount: disc,
       totalAmount: total,
-      vehicleNumber: editSaleVehicle.trim(),
+      vehicleNumber: vehicleValidation.normalized,
       notes: editSaleNotes.trim(),
     });
     setEditingSale(null);
@@ -226,7 +302,7 @@ export default function CustomerProfilePage({
   };
 
   return (
-    <div className="flex flex-col min-h-full bg-[#f3f4f6] pb-36">
+    <div className="flex flex-col min-h-full bg-[#f3f4f6]">
       {/* 1. Compact Dark Navy Top Bar matching Reference Screenshot */}
       <header className="sticky top-0 z-30 flex h-14 items-center justify-between bg-[#213547] px-4 text-white shadow-md">
         <Link
@@ -238,52 +314,54 @@ export default function CustomerProfilePage({
           <ArrowLeft size={22} />
         </Link>
 
-        <h1 className="text-base font-bold tracking-tight text-white truncate max-w-[200px] text-center">
+        <h1 className="text-base font-bold tracking-tight text-white truncate max-w-[220px] text-center flex-1">
           {customer.name}
         </h1>
 
         <button
           onClick={handleDeleteCustomer}
           id="btn-delete-customer"
-          className="flex h-9 w-9 items-center justify-center rounded-full text-red-300 hover:text-white hover:bg-red-500/20 active:scale-95 transition-all"
+          className="flex h-9 w-9 items-center justify-center rounded-full text-[#f87171] hover:text-red-300 hover:bg-red-500/20 active:scale-95 transition-all cursor-pointer"
           aria-label="Delete Customer"
           title="Delete Customer Account"
         >
-          <Trash2 size={19} />
+          <Trash2 size={20} />
         </button>
       </header>
 
-      <div className="px-4 pt-4 space-y-4">
+      <div className="px-4 pt-4 pb-12 space-y-4">
         {/* 2. Peach/Cream Customer Information Card matching Reference Screenshot */}
-        <div className="rounded-[26px] bg-[#fdf3e7] border border-amber-200/70 p-4.5 shadow-xs space-y-3.5">
-          {/* Top Row: Avatar + Info */}
-          <div className="flex items-center">
-            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-[#fde8d0] border border-amber-300/80 text-xl font-bold text-[#d97706] mr-3.5 shadow-2xs">
-              {initialChar}
-            </div>
-            <div className="min-w-0 flex-1">
-              <h2 className="text-base font-bold text-[#1a2b3c] truncate leading-tight">
-                {customer.name}
-              </h2>
-              <div className="mt-1 flex items-center text-xs text-gray-600">
-                <Phone size={13} className="mr-1 text-gray-400 shrink-0" />
-                <span className="truncate">{customer.phone}</span>
-              </div>
-              <div className="mt-0.5 flex items-center text-xs text-gray-500">
-                <MapPin size={13} className="mr-1 text-gray-400 shrink-0" />
-                <span className="truncate">{customer.place || 'Kerala'}</span>
-              </div>
-            </div>
+        <div className="rounded-[28px] bg-[#fdf3e7] border border-amber-200/60 p-5 shadow-xs flex flex-col items-center text-center">
+          {/* Avatar centered with dark navy ring */}
+          <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full bg-[#fde8d0] border-[2px] border-[#213547] text-2xl font-bold text-[#b45309] shadow-xs">
+            {initialChar}
           </div>
 
-          {/* Two Side-by-Side Action Buttons: Call Customer & Edit Details */}
-          <div className="grid grid-cols-2 gap-2.5 pt-0.5">
+          {/* Customer Name centered */}
+          <h2 className="mt-3 text-lg font-bold text-[#111827] leading-tight">
+            {customer.name}
+          </h2>
+
+          {/* Phone centered */}
+          <div className="mt-1.5 flex items-center justify-center gap-1.5 text-xs text-gray-700 font-medium">
+            <Phone size={13} className="text-[#b45309] shrink-0" />
+            <span>{customer.phone}</span>
+          </div>
+
+          {/* Location centered */}
+          <div className="mt-1 flex items-center justify-center gap-1 text-xs text-gray-700 font-medium">
+            <MapPin size={13} className="text-[#b45309] shrink-0" />
+            <span>{customer.place || 'Aba'}</span>
+          </div>
+
+          {/* Action Buttons: Call Customer & Edit Details */}
+          <div className="mt-4 grid grid-cols-2 gap-3 w-full">
             <a
               href={`tel:${customer.phone}`}
               id="btn-call-customer"
-              className="flex items-center justify-center space-x-1.5 rounded-2xl bg-white border border-amber-200/90 py-2.5 text-xs font-bold text-[#1a2b3c] shadow-2xs hover:bg-amber-50 active:scale-[0.98] transition-all"
+              className="flex items-center justify-center gap-2 rounded-2xl bg-[#213547] py-3 text-xs font-bold text-white shadow-xs hover:bg-[#1a2b3c] active:scale-[0.98] transition-all"
             >
-              <Phone size={14} className="text-[#d97706]" />
+              <Phone size={14} className="text-white" />
               <span>Call Customer</span>
             </a>
 
@@ -291,9 +369,9 @@ export default function CustomerProfilePage({
               onClick={handleOpenEditCustomer}
               id="btn-edit-customer"
               type="button"
-              className="flex items-center justify-center space-x-1.5 rounded-2xl bg-white border border-amber-200/90 py-2.5 text-xs font-bold text-[#1a2b3c] shadow-2xs hover:bg-amber-50 active:scale-[0.98] transition-all"
+              className="flex items-center justify-center gap-2 rounded-2xl bg-white border border-gray-300/80 py-3 text-xs font-bold text-[#1a2b3c] shadow-xs hover:bg-gray-50 active:scale-[0.98] transition-all cursor-pointer"
             >
-              <Pencil size={14} className="text-[#d97706]" />
+              <Pencil size={14} className="text-gray-700" />
               <span>Edit Details</span>
             </button>
           </div>
@@ -303,35 +381,35 @@ export default function CustomerProfilePage({
             onClick={handleDownloadPDF}
             id="btn-generate-weekly-bill"
             type="button"
-            className="flex w-full items-center justify-center space-x-2 rounded-2xl bg-[#d97706] py-3 text-xs font-bold text-white shadow-md hover:bg-[#b45309] active:scale-[0.98] transition-all"
+            className="mt-3 flex w-full items-center justify-center gap-2 rounded-2xl bg-[#d97706] py-3.5 text-xs font-bold text-white shadow-md hover:bg-[#b45309] active:scale-[0.98] transition-all cursor-pointer"
           >
-            <FileDown size={16} />
+            <FileText size={16} className="text-white" />
             <span>Generate Weekly Bill (PDF)</span>
           </button>
         </div>
 
         {/* 3. Rounded Tab Switcher matching Reference Screenshot */}
-        <div className="flex rounded-2xl bg-white p-1 border border-slate-200/80 shadow-xs">
+        <div className="flex rounded-2xl bg-[#eaedf1] p-1 border border-slate-200/60">
           <button
             type="button"
             id="tab-sales-history"
             onClick={() => setActiveTab('SALES')}
-            className={`flex-1 rounded-xl py-2.5 text-xs font-bold transition-all ${
+            className={`flex-1 rounded-xl py-2.5 text-xs font-bold transition-all cursor-pointer ${
               activeTab === 'SALES'
                 ? 'bg-[#213547] text-white shadow-xs'
-                : 'text-gray-500 hover:text-gray-900'
+                : 'text-gray-600 hover:text-gray-900'
             }`}
           >
-            Sales History
+            Sales History ({customerDispatches.length})
           </button>
           <button
             type="button"
             id="tab-balance-history"
             onClick={() => setActiveTab('BALANCE')}
-            className={`flex-1 rounded-xl py-2.5 text-xs font-bold transition-all ${
+            className={`flex-1 rounded-xl py-2.5 text-xs font-bold transition-all cursor-pointer ${
               activeTab === 'BALANCE'
                 ? 'bg-[#213547] text-white shadow-xs'
-                : 'text-gray-500 hover:text-gray-900'
+                : 'text-gray-600 hover:text-gray-900'
             }`}
           >
             Balance History
@@ -343,9 +421,9 @@ export default function CustomerProfilePage({
           <div className="space-y-3">
             {/* Sales Orders Heading & Count */}
             <div className="flex items-center justify-between px-1">
-              <h3 className="text-sm font-bold text-[#1a2b3c]">Sales Orders</h3>
-              <span className="rounded-full bg-amber-100/90 px-2.5 py-0.5 text-[11px] font-bold text-[#d97706]">
-                {customerDispatches.length} Orders
+              <h3 className="text-sm font-bold text-[#111827]">Sales Orders</h3>
+              <span className="rounded-full bg-[#fef3c7] px-2.5 py-0.5 text-[11px] font-bold text-[#b45309]">
+                {customerDispatches.length} Entries
               </span>
             </div>
 
@@ -359,101 +437,113 @@ export default function CustomerProfilePage({
                 </p>
               </div>
             ) : (
-              <div className="space-y-2.5">
+              <div className="space-y-3">
                 {customerDispatches.map((sale) => {
-                  const blockNominal =
-                    BLOCK_CONFIGS[sale.blockType]?.nominalSize || sale.blockType;
-                  const paymentStatus =
-                    sale.paymentStatus ||
-                    ((sale.paidAmount || 0) >= sale.totalAmount && sale.totalAmount > 0
-                      ? 'PAID'
-                      : (sale.paidAmount || 0) > 0
-                      ? 'PARTIAL'
-                      : 'UNPAID');
+                  const blockNominal = formatBlockTypeDisplay(sale.blockType);
+                  const isPaid = (sale.paidAmount || 0) >= sale.totalAmount && sale.totalAmount > 0;
 
                   return (
                     <div
                       key={sale.id}
-                      className="rounded-2xl bg-white p-4 border border-slate-100 shadow-xs space-y-2.5 hover:border-slate-200 transition-all"
+                      className="rounded-[22px] bg-white p-4 border border-gray-200/80 shadow-xs space-y-3 hover:border-slate-300 transition-all"
                     >
-                      {/* Top Row: Nominal Block Type + Total Amount */}
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center space-x-2">
-                          <span className="rounded-lg bg-amber-50 px-2.5 py-0.5 text-xs font-bold text-[#d97706]">
-                            {blockNominal}
-                          </span>
-                          <span className="text-xs font-semibold text-gray-600">
-                            {sale.quantity.toLocaleString('en-IN')} blocks
-                          </span>
+                      {/* Top Row: Icon + Type & Bricks (Left) | Price & Date & Edit (Right) */}
+                      <div className="flex items-start justify-between">
+                        <div className="flex items-center space-x-3">
+                          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-[#fef3c7]">
+                            <Box size={22} className="text-[#d97706]" />
+                          </div>
+                          <div>
+                            <h4 className="text-[15px] font-bold text-[#111827] leading-tight">
+                              {blockNominal}
+                            </h4>
+                            <p className="text-xs text-gray-500 font-medium mt-0.5">
+                              {sale.quantity.toLocaleString('en-IN')} Bricks
+                            </p>
+                          </div>
                         </div>
-                        <span className="text-sm font-bold text-[#1a2b3c]">
-                          ₹ {sale.totalAmount.toLocaleString('en-IN')}
-                        </span>
+
+                        <div className="flex items-center space-x-2.5">
+                          <div className="text-right">
+                            <p className="text-base font-bold text-[#111827] leading-tight">
+                              ₹{sale.totalAmount.toLocaleString('en-IN')}
+                            </p>
+                            <p className="text-xs text-gray-400 font-medium mt-0.5">
+                              {formatCustomDate(sale.date)}
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleOpenEditSale(sale)}
+                            className="p-1 text-gray-400 hover:text-gray-700 active:scale-95 transition-all cursor-pointer"
+                            aria-label="Edit Sale"
+                            title="Edit Sale"
+                          >
+                            <Pencil size={15} />
+                          </button>
+                        </div>
                       </div>
 
-                      {/* Middle Row: Date & Rate per Brick */}
-                      <div className="flex items-center justify-between text-xs text-gray-500">
-                        <div className="flex items-center space-x-1.5">
-                          <Calendar size={13} className="text-gray-400 shrink-0" />
-                          <span>{formatFriendlyDate(sale.date)}</span>
+                      {/* Middle Row: Rate/Brick | Paid + Credit/Bill badge | Offer */}
+                      <div className="rounded-2xl bg-[#f8fafc] p-3 px-4 border border-slate-100 flex items-center justify-between">
+                        <div>
+                          <p className="text-[11px] font-medium text-gray-400">Rate/Brick</p>
+                          <p className="text-sm font-bold text-gray-800 mt-0.5">
+                            ₹{sale.unitPrice}
+                          </p>
                         </div>
-                        <span className="font-medium text-gray-600">
-                          Rate: ₹{sale.unitPrice}/brick
-                        </span>
+
+                        <div className="text-center flex flex-col items-center">
+                          <p className="text-[11px] font-medium text-gray-400">Paid</p>
+                          <p className="text-sm font-bold text-gray-800 mt-0.5">
+                            ₹{(sale.paidAmount || 0).toLocaleString('en-IN')}
+                          </p>
+                          <span
+                            className={`mt-1 inline-block rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                              isPaid
+                                ? 'bg-emerald-100 text-[#059669]'
+                                : 'bg-[#fef3c7] text-[#b45309]'
+                            }`}
+                          >
+                            {isPaid ? 'Paid' : 'Credit / Bill'}
+                          </span>
+                        </div>
+
+                        <div className="text-right">
+                          <p className="text-[11px] font-medium text-gray-400">Offer</p>
+                          <p className="text-sm font-bold text-[#d97706] mt-0.5">
+                            ₹{(sale.discount || 0).toLocaleString('en-IN')}
+                          </p>
+                        </div>
                       </div>
 
-                      {/* Payment, Paid Amount & Discount Row */}
-                      <div className="flex items-center justify-between text-[11px] border-t border-gray-100 pt-2">
-                        <div className="flex items-center space-x-2 text-gray-600">
-                          <span>
-                            Paid:{' '}
-                            <strong className="text-[#059669]">
-                              ₹{(sale.paidAmount || 0).toLocaleString('en-IN')}
-                            </strong>
+                      {/* Bottom Row: Vehicle Number */}
+                      <div className="flex items-center text-xs text-gray-500 font-medium space-x-1.5 pt-0.5">
+                        <Truck size={14} className="text-gray-400 shrink-0" />
+                        <span>
+                          Vehicle:{' '}
+                          <span className="text-gray-700 font-bold font-mono">
+                            {sale.vehicleNumber || 'N/A'}
                           </span>
-                          {sale.discount ? (
-                            <span className="text-amber-700">
-                              (Off: ₹{sale.discount.toLocaleString('en-IN')})
-                            </span>
-                          ) : null}
-                        </div>
-                        <span
-                          className={`rounded-md px-2 py-0.5 text-[10px] font-bold ${
-                            paymentStatus === 'PAID'
-                              ? 'bg-emerald-100 text-[#059669]'
-                              : paymentStatus === 'PARTIAL'
-                              ? 'bg-amber-100 text-[#d97706]'
-                              : 'bg-red-50 text-red-600'
-                          }`}
-                        >
-                          {paymentStatus}
                         </span>
-                      </div>
-
-                      {/* Vehicle Number & Edit Action */}
-                      <div className="flex items-center justify-between text-[11px] pt-0.5">
-                        {sale.vehicleNumber ? (
-                          <span className="rounded-md bg-gray-100 px-2 py-0.5 font-mono text-[10px] font-bold text-[#213547]">
-                            {sale.vehicleNumber}
-                          </span>
-                        ) : (
-                          <span className="text-[10px] text-gray-400 italic">No vehicle</span>
-                        )}
-
-                        <button
-                          type="button"
-                          onClick={() => handleOpenEditSale(sale)}
-                          className="inline-flex items-center space-x-1 text-xs font-semibold text-[#d97706] hover:text-[#b45309]"
-                        >
-                          <Pencil size={12} />
-                          <span>Edit</span>
-                        </button>
                       </div>
                     </div>
                   );
                 })}
               </div>
             )}
+
+            {/* Add Sale Button matching exact Reference Screenshot */}
+            <div className="pt-2">
+              <Link
+                href={`/customers/${customer.id}/add-sale`}
+                id="btn-add-sale"
+                className="flex items-center justify-center gap-2 w-full rounded-2xl bg-[#d97706] py-3.5 text-[15px] font-bold text-white shadow-md hover:bg-[#b45309] active:scale-[0.98] transition-all cursor-pointer"
+              >
+                <PlusCircle size={20} className="text-white" />
+                <span>Add Sale</span>
+              </Link>
+            </div>
           </div>
         )}
 
@@ -597,90 +687,28 @@ export default function CustomerProfilePage({
                 })}
               </div>
             )}
+            {/* Add Sale Button on Balance Tab */}
+            <div className="pt-2">
+              <Link
+                href={`/customers/${customer.id}/add-sale`}
+                id="btn-add-sale-balance"
+                className="flex items-center justify-center gap-2 w-full rounded-2xl bg-[#d97706] py-3.5 text-[15px] font-bold text-white shadow-md hover:bg-[#b45309] active:scale-[0.98] transition-all cursor-pointer"
+              >
+                <PlusCircle size={20} className="text-white" />
+                <span>Add Sale</span>
+              </Link>
+            </div>
           </div>
         )}
       </div>
 
-      {/* 6. Fixed Bottom Add Sale Button matching Reference Screenshot */}
-      <div className="fixed bottom-20 left-0 right-0 mx-auto w-full max-w-[400px] px-4 pointer-events-none z-50">
-        <Link
-          href={`/customers/${customer.id}/add-sale`}
-          id="btn-add-sale-bottom"
-          className="pointer-events-auto flex items-center justify-center space-x-2 w-full rounded-2xl bg-[#d97706] py-3.5 text-sm font-bold text-white shadow-xl hover:bg-[#b45309] active:scale-95 transition-all"
-        >
-          <Plus size={20} className="stroke-[2.5]" />
-          <span>Add Sale</span>
-        </Link>
-      </div>
-
       {/* Modal: Edit Customer Details */}
-      {isEditCustomerOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-xs">
-          <div className="w-full max-w-[360px] overflow-hidden rounded-3xl bg-white shadow-2xl">
-            <div className="flex items-center justify-between bg-[#213547] px-5 py-4 text-white">
-              <div className="flex items-center space-x-2">
-                <Pencil size={18} className="text-[#fcd34d]" />
-                <h3 className="font-semibold text-sm">Edit Customer</h3>
-              </div>
-              <button
-                onClick={() => setIsEditCustomerOpen(false)}
-                className="rounded-full p-1 text-white/80 hover:bg-white/10"
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            <form onSubmit={handleSaveCustomer} className="p-5 space-y-3.5">
-              <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1">
-                  Customer Name *
-                </label>
-                <input
-                  type="text"
-                  value={editName}
-                  onChange={(e) => setEditName(e.target.value)}
-                  required
-                  className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-xs text-[#111827] focus:border-[#d97706] focus:outline-none"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1">
-                  Phone Number *
-                </label>
-                <input
-                  type="tel"
-                  value={editPhone}
-                  onChange={(e) => setEditPhone(e.target.value)}
-                  required
-                  className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-xs text-[#111827] focus:border-[#d97706] focus:outline-none"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1">
-                  Location / Site
-                </label>
-                <input
-                  type="text"
-                  value={editPlace}
-                  onChange={(e) => setEditPlace(e.target.value)}
-                  className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-xs text-[#111827] focus:border-[#d97706] focus:outline-none"
-                />
-              </div>
-
-              <div className="pt-2">
-                <button
-                  type="submit"
-                  className="w-full rounded-2xl bg-[#d97706] py-3 text-xs font-bold text-white shadow-md hover:bg-[#b45309] active:scale-[0.99]"
-                >
-                  Save Changes
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      <CustomerModal
+        isOpen={isEditCustomerOpen}
+        initialCustomer={customer}
+        onClose={() => setIsEditCustomerOpen(false)}
+        onSubmit={handleUpdateCustomer}
+      />
 
       {/* Modal: Edit Sale Details */}
       {editingSale && (
@@ -700,16 +728,37 @@ export default function CustomerProfilePage({
             </div>
 
             <form onSubmit={handleSaveSale} className="p-5 space-y-3">
+              {editSaleError && (
+                <div className="rounded-xl bg-red-50 border border-red-200 p-2.5 text-xs font-semibold text-red-700 flex items-start space-x-2">
+                  <AlertCircle size={16} className="text-red-600 shrink-0 mt-0.5" />
+                  <span>{editSaleError}</span>
+                </div>
+              )}
+
               <div>
                 <label className="block text-xs font-semibold text-gray-700 mb-1">
                   Sale Date
                 </label>
-                <input
-                  type="date"
+                <div
+                  onClick={() => setIsEditSaleDateOpen(true)}
+                  id="btn-edit-sale-date"
+                  className="w-full flex items-center justify-between rounded-xl border border-gray-300 bg-white px-3 py-2 text-xs text-[#111827] hover:border-[#d97706] transition-colors cursor-pointer"
+                >
+                  <span className="font-semibold text-gray-900">
+                    {editSaleDate ? formatFriendlyDate(editSaleDate) : 'Select date'}
+                  </span>
+                  <Calendar size={16} className="text-[#d97706]" />
+                </div>
+                <DatePickerModal
+                  isOpen={isEditSaleDateOpen}
                   value={editSaleDate}
-                  onChange={(e) => setEditSaleDate(e.target.value)}
-                  required
-                  className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-xs text-[#111827] focus:border-[#d97706] focus:outline-none"
+                  title="Select sale date"
+                  maxDate={getTodayDateString()}
+                  onChange={(val) => {
+                    setEditSaleDate(val);
+                    setEditSaleError(null);
+                  }}
+                  onClose={() => setIsEditSaleDateOpen(false)}
                 />
               </div>
 
@@ -754,15 +803,33 @@ export default function CustomerProfilePage({
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-gray-700 mb-1">
-                    Vehicle Plate
-                  </label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-xs font-semibold text-gray-700">
+                      Vehicle Number *
+                    </label>
+                    {editSaleVehicle.trim() && (
+                      validateKeralaVehicleNumber(editSaleVehicle).isValid ? (
+                        <span className="rounded bg-emerald-100 px-1.5 py-0.2 text-[9px] font-bold text-[#059669]">
+                          Valid MVD
+                        </span>
+                      ) : (
+                        <span className="rounded bg-red-100 px-1.5 py-0.2 text-[9px] font-bold text-red-600">
+                          Invalid MVD
+                        </span>
+                      )
+                    )}
+                  </div>
                   <input
                     type="text"
                     value={editSaleVehicle}
-                    onChange={(e) => setEditSaleVehicle(e.target.value)}
-                    placeholder="e.g. KL-07-AB-1234"
-                    className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-xs uppercase font-mono text-[#111827] focus:border-[#d97706] focus:outline-none"
+                    onChange={(e) => {
+                      const formatted = formatKeralaPlateAsYouType(e.target.value);
+                      setEditSaleVehicle(formatted);
+                      setEditSaleError(null);
+                    }}
+                    placeholder="KL-07-A-1234"
+                    required
+                    className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-xs uppercase font-mono text-[#111827] focus:border-[#d97706] focus:outline-none placeholder-gray-400"
                   />
                 </div>
               </div>
@@ -836,12 +903,22 @@ export default function CustomerProfilePage({
                 <label className="block text-xs font-semibold text-gray-700 mb-1">
                   Date Received
                 </label>
-                <input
-                  type="date"
+                <div
+                  onClick={() => setIsPayDateOpen(true)}
+                  id="btn-payment-date"
+                  className="w-full flex items-center justify-between rounded-xl border border-gray-300 bg-white px-3 py-2 text-xs text-[#111827] hover:border-[#d97706] transition-colors cursor-pointer"
+                >
+                  <span className="font-semibold text-gray-900">
+                    {payDate ? formatFriendlyDate(payDate) : 'Select date'}
+                  </span>
+                  <Calendar size={16} className="text-[#d97706]" />
+                </div>
+                <DatePickerModal
+                  isOpen={isPayDateOpen}
                   value={payDate}
-                  onChange={(e) => setPayDate(e.target.value)}
-                  required
-                  className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-xs text-[#111827] focus:border-[#d97706] focus:outline-none"
+                  title="Select payment date"
+                  onChange={(val) => setPayDate(val)}
+                  onClose={() => setIsPayDateOpen(false)}
                 />
               </div>
 
@@ -939,6 +1016,165 @@ export default function CustomerProfilePage({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Generate Weekly Bill / Date Range Statement Modal */}
+      {isBillModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-xs">
+          <div className="w-full max-w-[360px] overflow-hidden rounded-3xl bg-white shadow-2xl">
+            <div className="flex items-center justify-between bg-[#213547] px-5 py-4 text-white">
+              <div className="flex items-center space-x-2">
+                <FileText size={18} className="text-[#fcd34d]" />
+                <div>
+                  <h3 className="font-semibold text-sm">Generate Bill / Statement</h3>
+                  <p className="text-[11px] text-white/70">{customer.name}</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsBillModalOpen(false)}
+                className="rounded-full p-1 text-white/80 hover:bg-white/10 cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4">
+              {/* Quick Range Presets */}
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 mb-1.5">
+                  Statement Period
+                </label>
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const d = new Date();
+                      d.setDate(d.getDate() - 7);
+                      const y = d.getFullYear();
+                      const m = String(d.getMonth() + 1).padStart(2, '0');
+                      const day = String(d.getDate()).padStart(2, '0');
+                      setBillFromDate(`${y}-${m}-${day}`);
+                      setBillToDate(getTodayDateString());
+                    }}
+                    className="rounded-xl border border-amber-300 bg-[#fdecdb] py-2 text-[11px] font-bold text-[#854d0e] hover:bg-amber-200/70 transition-colors cursor-pointer"
+                  >
+                    Last 7 Days
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const d = new Date();
+                      d.setDate(d.getDate() - 30);
+                      const y = d.getFullYear();
+                      const m = String(d.getMonth() + 1).padStart(2, '0');
+                      const day = String(d.getDate()).padStart(2, '0');
+                      setBillFromDate(`${y}-${m}-${day}`);
+                      setBillToDate(getTodayDateString());
+                    }}
+                    className="rounded-xl border border-gray-200 bg-gray-50 py-2 text-[11px] font-bold text-gray-700 hover:bg-gray-100 transition-colors cursor-pointer"
+                  >
+                    Last 30 Days
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setBillFromDate('');
+                      setBillToDate('');
+                    }}
+                    className="rounded-xl border border-gray-200 bg-gray-50 py-2 text-[11px] font-bold text-gray-700 hover:bg-gray-100 transition-colors cursor-pointer"
+                  >
+                    All Time
+                  </button>
+                </div>
+              </div>
+
+              {/* From Date & To Date Range Inputs */}
+              <div className="grid grid-cols-2 gap-2.5">
+                <div>
+                  <label className="block text-[11px] font-semibold text-gray-600 mb-1">
+                    From Date
+                  </label>
+                  <div
+                    onClick={() => setIsBillFromDateOpen(true)}
+                    id="btn-bill-from-date"
+                    className="flex items-center justify-between rounded-xl border border-gray-300 bg-white px-2.5 py-2 text-xs text-[#111827] hover:border-[#d97706] transition-colors cursor-pointer shadow-xs"
+                  >
+                    <span className="truncate font-semibold text-[11px]">
+                      {billFromDate ? formatFriendlyDate(billFromDate) : 'Start Date'}
+                    </span>
+                    <Calendar size={14} className="text-[#d97706] shrink-0 ml-1" />
+                  </div>
+                  <DatePickerModal
+                    isOpen={isBillFromDateOpen}
+                    value={billFromDate || getTodayDateString()}
+                    title="Select start date"
+                    onChange={(val) => setBillFromDate(val)}
+                    onClose={() => setIsBillFromDateOpen(false)}
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-semibold text-gray-600 mb-1">
+                    To Date
+                  </label>
+                  <div
+                    onClick={() => setIsBillToDateOpen(true)}
+                    id="btn-bill-to-date"
+                    className="flex items-center justify-between rounded-xl border border-gray-300 bg-white px-2.5 py-2 text-xs text-[#111827] hover:border-[#d97706] transition-colors cursor-pointer shadow-xs"
+                  >
+                    <span className="truncate font-semibold text-[11px]">
+                      {billToDate ? formatFriendlyDate(billToDate) : 'End Date'}
+                    </span>
+                    <Calendar size={14} className="text-[#d97706] shrink-0 ml-1" />
+                  </div>
+                  <DatePickerModal
+                    isOpen={isBillToDateOpen}
+                    value={billToDate || getTodayDateString()}
+                    title="Select end date"
+                    onChange={(val) => setBillToDate(val)}
+                    onClose={() => setIsBillToDateOpen(false)}
+                  />
+                </div>
+              </div>
+
+              {/* Transactions count summary */}
+              <div className="rounded-xl bg-slate-50 border border-slate-200/60 p-3 text-xs text-gray-600 flex items-center justify-between">
+                <span>Matching Entries:</span>
+                <span className="font-bold text-[#111827]">
+                  {
+                    ledger.filter((entry) => {
+                      if (billFromDate && entry.date < billFromDate) return false;
+                      if (billToDate && entry.date > billToDate) return false;
+                      return true;
+                    }).length
+                  }{' '}
+                  transactions
+                </span>
+              </div>
+
+              {/* Actions */}
+              <div className="pt-1 flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsBillModalOpen(false)}
+                  className="flex-1 rounded-2xl border border-gray-300 bg-white py-3 text-xs font-bold text-gray-700 hover:bg-gray-50 active:scale-[0.98] transition-all cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  id="btn-download-pdf-confirm"
+                  onClick={handleGeneratePDFFromModal}
+                  className="flex-[2] flex items-center justify-center gap-1.5 rounded-2xl bg-[#d97706] py-3 text-xs font-bold text-white shadow-md hover:bg-[#b45309] active:scale-[0.98] transition-all cursor-pointer"
+                >
+                  <FileDown size={15} />
+                  <span>Download PDF</span>
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}
