@@ -3,9 +3,10 @@ import { calculateCuringStatus, getTodayDateString } from './curingCalculator';
 
 export interface StockSummary {
   blockType: BlockType;
-  todayProduced: number; // Produced today
-  totalProduced: number; // Historical total produced
-  totalAvailable: number; // All remaining in yard (curing + ready)
+  todayProduced: number; // Remaining quantity produced today
+  totalStock: number;    // Total remaining stock in yard (curing + ready)
+  totalAvailable: number; // Alias for totalStock
+  totalProduced: number; // Alias for totalStock (backward compatibility)
   curingStock: number;   // In 14-day curing cycle (locked)
   readyStock: number;    // Fully cured (>=14 days) and eligible for dispatch ("Good" stock)
 }
@@ -21,8 +22,8 @@ export function normalizeProductionRecords(
     const calculated = calculateCuringStatus(record.date, currentDateStr);
     return {
       ...record,
-      status: record.status || calculated.status,
-      daysRemaining: record.daysRemaining !== undefined ? record.daysRemaining : calculated.daysRemaining,
+      status: calculated.status,
+      daysRemaining: calculated.daysRemaining,
       curingEndDate: record.curingEndDate || calculated.curingEndDate,
     };
   });
@@ -40,31 +41,44 @@ export function calculateStockSummary(
   const typeRecords = normalized.filter((r) => r.blockType === blockType);
 
   let todayProduced = 0;
-  let totalProduced = 0;
-  let totalAvailable = 0;
+  let totalStock = 0;
   let curingStock = 0;
   let readyStock = 0;
 
   for (const record of typeRecords) {
-    totalProduced += record.netQuantity;
-    totalAvailable += record.remainingQuantity;
-
-    if (record.date === currentDateStr) {
-      todayProduced += record.netQuantity;
+    // Future-dated production records must not be counted as today's production or valid stock
+    if (record.date > currentDateStr) {
+      continue;
     }
 
+    const remaining = Math.max(0, Number(record.remainingQuantity ?? record.netQuantity) || 0);
+
+    // 1. Today's Production:
+    // If a production record's Production Date matches today's local date,
+    // include its remaining quantity in the corresponding Today statistic.
+    if (record.date === currentDateStr) {
+      todayProduced += remaining;
+    }
+
+    // 2. Total Stock:
+    // Include remaining stock of all valid production records (past or today).
+    // Depleted or sold bricks (remainingQuantity === 0) contribute 0.
+    totalStock += remaining;
+
+    // 3. Good / Ready Stock vs 4. Curing Stock:
     if (record.status === 'READY') {
-      readyStock += record.remainingQuantity;
+      readyStock += remaining;
     } else {
-      curingStock += record.remainingQuantity;
+      curingStock += remaining;
     }
   }
 
   return {
     blockType,
     todayProduced,
-    totalProduced,
-    totalAvailable,
+    totalStock,
+    totalAvailable: totalStock,
+    totalProduced: totalStock,
     curingStock,
     readyStock,
   };

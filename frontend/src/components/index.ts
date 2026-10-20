@@ -6,6 +6,7 @@ export { default as BottomNav } from './layout/BottomNav';
 export { default as Card, type CardProps } from './ui/Card';
 export { default as Badge, type BadgeProps, type BadgeVariant } from './ui/Badge';
 export { default as DatePickerModal, type DatePickerModalProps } from './ui/DatePickerModal';
+export { default as CustomSelect, type CustomSelectProps, type CustomSelectOption } from './ui/CustomSelect';
 
 // Domain Feature Components
 export { default as ProductionBatchCard, type ProductionBatchCardProps } from './production/ProductionBatchCard';

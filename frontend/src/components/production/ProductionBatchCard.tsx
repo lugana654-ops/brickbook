@@ -3,6 +3,7 @@
 import React from 'react';
 import { Clock, CheckCircle2, Pencil, Trash2 } from 'lucide-react';
 import { ProductionRecord } from '@/types';
+import { isProductionEditable } from '@/lib/productionLimits';
 
 // Formats YYYY-MM-DD to D-M-YYYY without leading zero (e.g. 29-9-2026, 2-9-2026)
 export function formatBatchCardDate(dateStr: string): string {
@@ -50,9 +51,9 @@ export function ProductionBatchCard({
   const isCuring = batch.status === 'CURING';
   const blockLabel = formatBlockNominal(batch.blockType);
   const steps = calculatePressSteps(batch);
-  const remainingStock = batch.remainingQuantity ?? batch.producedQuantity;
   const prodDate = formatBatchCardDate(batch.date);
   const readyDate = formatBatchCardDate(batch.curingEndDate);
+  const isEditable = isProductionEditable(batch);
 
   return (
     <div className="rounded-2xl bg-white p-3.5 border border-slate-100/90 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
@@ -96,25 +97,26 @@ export function ProductionBatchCard({
             )}
           </div>
 
-          {/* Row 2: Produced Quantity with Press Steps */}
-          <p className="text-[12px] text-gray-500 font-medium mt-0.5">
-            Produced: {batch.producedQuantity} Bricks ({steps} steps)
-          </p>
-
-          {/* Row 3: Remaining Yard Stock (Green) and Action Icons */}
-          <div className="flex items-center justify-between mt-0.5">
-            <span className="text-[12px] font-bold text-[#059669]">
-              Remaining Yard Stock: {remainingStock}
-            </span>
+          {/* Row 2: Produced Quantity with Press Steps & Action Icons */}
+          <div className="flex items-center justify-between mt-1">
+            <p className="text-[12px] text-gray-500 font-medium">
+              Produced: {batch.producedQuantity} Bricks ({steps} steps)
+            </p>
 
             {(onEdit || onDelete) && (
-              <div className="flex items-center gap-2.5 text-gray-400">
+              <div className="flex items-center gap-2.5 text-gray-400 shrink-0">
                 {onEdit && (
                   <button
                     type="button"
-                    onClick={() => onEdit(batch)}
-                    className="hover:text-gray-600 transition-colors p-0.5 active:scale-95"
-                    title="Edit Batch"
+                    disabled={!isEditable}
+                    onClick={() => isEditable && onEdit(batch)}
+                    className={
+                      isEditable
+                        ? 'hover:text-gray-600 transition-colors p-0.5 active:scale-95 cursor-pointer text-gray-400'
+                        : 'opacity-25 cursor-not-allowed p-0.5 text-gray-300 pointer-events-none'
+                    }
+                    title={isEditable ? 'Edit Batch' : 'Edit Batch (Disabled - 24-hour limit expired)'}
+                    aria-label="Edit Batch"
                   >
                     <Pencil size={15} />
                   </button>
@@ -122,9 +124,15 @@ export function ProductionBatchCard({
                 {onDelete && (
                   <button
                     type="button"
-                    onClick={() => onDelete(batch.id, `${blockLabel} on ${prodDate}`)}
-                    className="hover:text-red-500 transition-colors p-0.5 active:scale-95"
-                    title="Delete Batch"
+                    disabled={!isEditable}
+                    onClick={() => isEditable && onDelete(batch.id, `${blockLabel} on ${prodDate}`)}
+                    className={
+                      isEditable
+                        ? 'hover:text-red-500 transition-colors p-0.5 active:scale-95 cursor-pointer text-gray-400'
+                        : 'opacity-25 cursor-not-allowed p-0.5 text-gray-300 pointer-events-none'
+                    }
+                    title={isEditable ? 'Delete Batch' : 'Delete Batch (Disabled - 24-hour limit expired)'}
+                    aria-label="Delete Batch"
                   >
                     <Trash2 size={15} />
                   </button>
@@ -135,8 +143,8 @@ export function ProductionBatchCard({
         </div>
       </div>
 
-      {/* Row 4: Dates Footer */}
-      <div className="flex items-center justify-between text-[11px] text-gray-500 font-medium mt-3.5 pt-1">
+      {/* Row 3: Dates Footer */}
+      <div className="flex items-center justify-between text-[11px] text-gray-500 font-medium mt-3 pt-0.5">
         <span>Prod Date: {prodDate}</span>
         <span>Ready Date: {readyDate}</span>
       </div>

@@ -4,3 +4,4 @@ export * from './fifoEngine';
 export * from './ledgerEngine';
 export * from './vehicleValidator';
 export * from './pdfGenerator';
+export * from './productionLimits';

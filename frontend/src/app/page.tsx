@@ -8,6 +8,20 @@ import { useBrickBook } from '@/context/BrickBookContext';
 export default function DashboardPage() {
   const { getStockSummary, isLoaded } = useBrickBook();
 
+  // Periodic listener to guarantee live updates as local date advances
+  const [, setTick] = React.useState(0);
+  React.useEffect(() => {
+    const handleRefresh = () => setTick((t) => t + 1);
+    const timer = setInterval(handleRefresh, 30000);
+    window.addEventListener('focus', handleRefresh);
+    document.addEventListener('visibilitychange', handleRefresh);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener('focus', handleRefresh);
+      document.removeEventListener('visibilitychange', handleRefresh);
+    };
+  }, []);
+
   // Real-time calculated stock metrics
   const stock4 = getStockSummary('4inch');
   const stock6 = getStockSummary('6inch');
@@ -59,7 +73,7 @@ export default function DashboardPage() {
             </div>
             <div className="mt-3">
               <span className="text-2xl font-bold tracking-tight text-[#1a2b3c] block">
-                {isLoaded ? stock4.totalProduced : 0}
+                {isLoaded ? stock4.totalStock : 0}
               </span>
               <span className="text-xs font-medium text-gray-500 mt-0.5 block">Total 4inch</span>
             </div>
@@ -72,7 +86,7 @@ export default function DashboardPage() {
             </div>
             <div className="mt-3">
               <span className="text-2xl font-bold tracking-tight text-[#1a2b3c] block">
-                {isLoaded ? stock6.totalProduced : 0}
+                {isLoaded ? stock6.totalStock : 0}
               </span>
               <span className="text-xs font-medium text-gray-500 mt-0.5 block">Total 6inch</span>
             </div>

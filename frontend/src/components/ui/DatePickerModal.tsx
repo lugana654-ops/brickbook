@@ -11,6 +11,7 @@ export interface DatePickerModalProps {
   minDate?: string; // Format: YYYY-MM-DD
   maxDate?: string; // Format: YYYY-MM-DD
   title?: string;
+  futureDateErrorMessage?: string;
 }
 
 const MONTH_NAMES = [
@@ -65,6 +66,7 @@ export default function DatePickerModal({
   minDate,
   maxDate,
   title = 'Select date',
+  futureDateErrorMessage,
 }: DatePickerModalProps) {
   const parsed = useMemo(() => parseDateParts(value), [value]);
 
@@ -172,7 +174,7 @@ export default function DatePickerModal({
     }
 
     if (maxDate && finalDateStr > maxDate) {
-      setManualError(`Date cannot be after ${maxDate}`);
+      setManualError(futureDateErrorMessage || `Date cannot be after ${maxDate}`);
       return;
     }
     if (minDate && finalDateStr < minDate) {
@@ -320,7 +322,7 @@ export default function DatePickerModal({
                 const val = e.target.value;
                 setManualDateText(val);
                 if (maxDate && val > maxDate) {
-                  setManualError(`Date cannot be after ${maxDate}`);
+                  setManualError(futureDateErrorMessage || `Date cannot be after ${maxDate}`);
                   return;
                 }
                 if (minDate && val < minDate) {
