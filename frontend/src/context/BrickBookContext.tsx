@@ -480,7 +480,7 @@ export function BrickBookProvider({ children }: { children: ReactNode }) {
     if (!fifoResult.success) {
       return {
         success: false,
-        error: fifoResult.errorMessage || 'Insufficient ready stock.',
+        error: fifoResult.errorMessage || 'Insufficient stock.',
       };
     }
 
@@ -573,13 +573,6 @@ export function BrickBookProvider({ children }: { children: ReactNode }) {
       return { success: false, error: 'Payment amount must be greater than zero.' };
     }
 
-    // Specific mode validations
-    if (input.paymentMode === 'UPI' && !input.referenceNumber?.trim()) {
-      return { success: false, error: 'UPI payments require a Reference / UTR Number.' };
-    }
-    if (input.paymentMode === 'BANK' && !input.bankName?.trim()) {
-      return { success: false, error: 'Bank Transfer requires the Bank Name.' };
-    }
 
     const paymentId = `pay_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
 

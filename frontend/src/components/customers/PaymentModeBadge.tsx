@@ -11,6 +11,7 @@ export function PaymentModeBadge({ mode, className = '' }: PaymentModeBadgeProps
     CASH: { bg: 'bg-gray-100', text: 'text-gray-800', label: 'Cash' },
     UPI: { bg: 'bg-[#e0e7ff]', text: 'text-[#4f46e5]', label: 'UPI' },
     BANK: { bg: 'bg-[#f3e8ff]', text: 'text-[#7e22ce]', label: 'Bank Transfer' },
+    CREDIT: { bg: 'bg-[#f7ebe1]', text: 'text-[#d97706]', label: 'Credit' },
   };
 
   const current = modeStyles[mode] || modeStyles.CASH;

@@ -1,23 +1,21 @@
 'use client';
 
-import React, { useState, use } from 'react';
+import React, { useState, use, useEffect, Suspense } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import {
   ArrowLeft,
   Calendar,
   AlertCircle,
   Truck,
   CheckCircle2,
-  Package,
 } from 'lucide-react';
 import { useBrickBook } from '@/context/BrickBookContext';
 import DatePickerModal from '@/components/ui/DatePickerModal';
 import { BlockType, BLOCK_CONFIGS, PaymentMode } from '@/types';
 import { getTodayDateString, formatFriendlyDate } from '@/lib/curingCalculator';
 import { validateKeralaVehicleNumber, formatKeralaPlateAsYouType } from '@/lib/vehicleValidator';
-import { allocateFIFODispatch } from '@/lib/fifoEngine';
-import { generateDispatchSlipPDF } from '@/lib/pdfGenerator';
+import { calculateStockSummary } from '@/lib/fifoEngine';
 import CustomSelect, { CustomSelectOption } from '@/components/ui/CustomSelect';
 
 const SALE_BRICK_OPTIONS: CustomSelectOption<BlockType>[] = [
@@ -25,38 +23,107 @@ const SALE_BRICK_OPTIONS: CustomSelectOption<BlockType>[] = [
   { value: '6inch', label: '6-inch' },
 ];
 
-export default function AddSalePage({
-  params,
-}: {
-  params: Promise<{ id: string }>;
-}) {
-  const resolvedParams = use(params);
-  const router = useRouter();
-  const { getCustomerById, productions, addDispatch, user } = useBrickBook();
+const PAYMENT_MODE_OPTIONS: CustomSelectOption<PaymentMode>[] = [
+  { value: 'CASH', label: 'Cash Payment' },
+  { value: 'UPI', label: 'UPI' },
+  { value: 'BANK', label: 'Bank Transfer / Cheque' },
+  { value: 'CREDIT', label: 'Credit' },
+];
 
-  const customer = getCustomerById(resolvedParams.id);
+function AddSaleContent({ customerId }: { customerId: string }) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const editSaleId = searchParams.get('editSaleId');
+
+  const {
+    getCustomerById,
+    productions,
+    dispatches,
+    addDispatch,
+    updateDispatch,
+    updateCustomer,
+    isLoaded,
+  } = useBrickBook();
+
+  const customer = getCustomerById(customerId);
+  const existingSale = editSaleId ? dispatches.find((d) => d.id === editSaleId) : undefined;
+  const isEditMode = Boolean(editSaleId && existingSale);
 
   // Form Fields in exact order:
   // 1. Brick Type
-  const [blockType, setBlockType] = useState<BlockType>('4inch');
+  const [blockType, setBlockType] = useState<BlockType>(existingSale?.blockType || '4inch');
   // 2. Sale Date with calendar icon
-  const [date, setDate] = useState<string>(getTodayDateString());
+  const [date, setDate] = useState<string>(existingSale?.date || getTodayDateString());
   // 3. Total Bricks & Rate/Brick (side by side)
-  const [quantity, setQuantity] = useState<number | string>('');
-  const [unitPrice, setUnitPrice] = useState<number | string>(
-    BLOCK_CONFIGS['4inch'].defaultUnitPrice
-  );
+  const [quantity, setQuantity] = useState<number | string>(existingSale?.quantity ?? '');
+  const [unitPrice, setUnitPrice] = useState<number | string>(existingSale?.unitPrice ?? '');
   // 4. Amount Received & Discount (Optional) (side by side)
-  const [amountReceived, setAmountReceived] = useState<number | string>('');
-  const [discount, setDiscount] = useState<number | string>('');
-  // 5. Payment Mode dropdown
-  const [paymentMode, setPaymentMode] = useState<PaymentMode>('CASH');
-  // 6. Vehicle Number (Optional)
-  const [vehicleNumber, setVehicleNumber] = useState<string>('');
+  const [amountReceived, setAmountReceived] = useState<number | string>(
+    existingSale?.paidAmount !== undefined ? existingSale.paidAmount : ''
+  );
+  const [discount, setDiscount] = useState<number | string>(
+    existingSale?.discount !== undefined ? existingSale.discount : ''
+  );
+  // 5. Payment Mode dropdown (defaults to CREDIT when amountReceived is ₹0)
+  const [paymentMode, setPaymentMode] = useState<PaymentMode>(
+    existingSale?.paymentMode || 'CREDIT'
+  );
+  const [lastNonCreditMode, setLastNonCreditMode] = useState<PaymentMode>(
+    existingSale?.paymentMode && existingSale.paymentMode !== 'CREDIT'
+      ? existingSale.paymentMode
+      : 'CASH'
+  );
+  // 6. Vehicle Number (Mandatory)
+  const [vehicleNumber, setVehicleNumber] = useState<string>(
+    existingSale?.vehicleNumber || ''
+  );
+  // 7. Notes
+  const [notes, setNotes] = useState<string>(existingSale?.notes || '');
 
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
+
+  // Synchronize when existingSale loads from storage
+  const [initializedId, setInitializedId] = useState<string | null>(existingSale?.id || null);
+
+  useEffect(() => {
+    if (existingSale && initializedId !== existingSale.id) {
+      setBlockType(existingSale.blockType || '4inch');
+      setDate(existingSale.date || getTodayDateString());
+      setQuantity(existingSale.quantity ?? '');
+      setUnitPrice(existingSale.unitPrice ?? '');
+      setAmountReceived(existingSale.paidAmount !== undefined ? existingSale.paidAmount : '');
+      setDiscount(existingSale.discount !== undefined ? existingSale.discount : '');
+      if (existingSale.paymentMode) {
+        setPaymentMode(existingSale.paymentMode);
+        if (existingSale.paymentMode !== 'CREDIT') {
+          setLastNonCreditMode(existingSale.paymentMode);
+        }
+      }
+      setVehicleNumber(existingSale.vehicleNumber || '');
+      setNotes(existingSale.notes || '');
+      setInitializedId(existingSale.id);
+    }
+  }, [existingSale, initializedId]);
+
+  if (!isLoaded) {
+    return (
+      <div className="flex flex-col min-h-full bg-[#f3f4f6]">
+        <header className="sticky top-0 z-30 flex h-14 items-center bg-[#213547] px-4 text-white shadow-md">
+          <Link href={`/customers/${customerId}`} className="p-1 rounded-full hover:bg-white/10">
+            <ArrowLeft size={22} />
+          </Link>
+          <span className="ml-3 font-bold text-sm">
+            {editSaleId ? 'Edit Sale' : 'Add Sale'}
+          </span>
+        </header>
+        <div className="p-8 text-center text-xs text-gray-500">
+          Loading sale data...
+        </div>
+      </div>
+    );
+  }
 
   if (!customer) {
     return (
@@ -74,11 +141,47 @@ export default function AddSalePage({
     );
   }
 
+  if (editSaleId && !existingSale) {
+    return (
+      <div className="flex flex-col min-h-full bg-[#f3f4f6]">
+        <header className="sticky top-0 z-30 flex h-14 items-center bg-[#213547] px-4 text-white shadow-md">
+          <Link href={`/customers/${customer.id}`} className="p-1 rounded-full hover:bg-white/10">
+            <ArrowLeft size={22} />
+          </Link>
+          <span className="ml-3 font-bold text-sm">Sale Not Found</span>
+        </header>
+        <div className="p-8 text-center text-xs text-gray-500">
+          Sales order not found or may have been deleted.
+        </div>
+      </div>
+    );
+  }
+
   // Handle block type change
   const handleBlockTypeChange = (type: BlockType) => {
     setBlockType(type);
-    setUnitPrice(BLOCK_CONFIGS[type].defaultUnitPrice);
     setErrorMessage(null);
+  };
+
+  // Handle amount received change - defaults to Credit when ₹0, restores previous mode when > ₹0
+  const handleAmountReceivedChange = (val: string) => {
+    setAmountReceived(val);
+    const num = Number(val);
+    if (!val || isNaN(num) || num <= 0) {
+      setPaymentMode('CREDIT');
+    } else {
+      if (paymentMode === 'CREDIT') {
+        setPaymentMode(lastNonCreditMode);
+      }
+    }
+  };
+
+  // Handle payment mode selection
+  const handlePaymentModeChange = (mode: PaymentMode) => {
+    setPaymentMode(mode);
+    if (mode !== 'CREDIT') {
+      setLastNonCreditMode(mode);
+    }
   };
 
   const reqQty = Number(quantity) || 0;
@@ -89,11 +192,17 @@ export default function AddSalePage({
   const received = Math.max(0, Number(amountReceived) || 0);
   const balanceDue = Math.max(0, totalBill - received);
 
-  // Real-time FIFO simulation for stock availability
-  const fifoSimulation = allocateFIFODispatch(productions, blockType, Math.max(1, reqQty));
-  const readyStock = fifoSimulation.availableReadyStock;
-  const curingLocked = fifoSimulation.curingStock;
-  const availableTotalStock = readyStock + curingLocked;
+  // Real-time stock metrics in yard
+  const stockSummary = calculateStockSummary(productions, blockType);
+  const readyStock = stockSummary.readyStock;
+  const curingLocked = stockSummary.curingStock;
+  const availableTotalStock = stockSummary.totalStock;
+
+  // In edit mode, add back the existing sale's quantity when calculating available stock
+  const originalQty =
+    isEditMode && existingSale && existingSale.blockType === blockType ? existingSale.quantity : 0;
+  const maxAvailableStock = availableTotalStock + originalQty;
+  const effectiveReadyStock = readyStock + originalQty;
 
   // Mandatory vehicle plate validation
   const vehicleValidation = vehicleNumber.trim()
@@ -120,13 +229,16 @@ export default function AddSalePage({
       return;
     }
 
-    if (reqQty > readyStock) {
+    // Block sale ONLY when requested quantity exceeds total remaining stock in yard
+    if (reqQty > maxAvailableStock) {
       setErrorMessage(
-        `Insufficient ready stock: Only ${readyStock.toLocaleString(
+        `Insufficient total stock: Requested ${reqQty.toLocaleString(
           'en-IN'
-        )} cured blocks available. ${curingLocked.toLocaleString(
+        )} blocks, but only ${maxAvailableStock.toLocaleString(
           'en-IN'
-        )} units are currently in 14-day curing and locked from dispatch.`
+        )} blocks available in yard (${readyStock.toLocaleString(
+          'en-IN'
+        )} cured, ${curingLocked.toLocaleString('en-IN')} in curing).`
       );
       return;
     }
@@ -145,26 +257,58 @@ export default function AddSalePage({
 
     setIsSubmitting(true);
 
-    const res = addDispatch({
-      customerId: customer.id,
-      date,
-      blockType,
-      quantity: reqQty,
-      unitPrice: rate,
-      discount: disc,
-      amountReceived: received,
-      paymentMode,
-      vehicleNumber: vehicleValidation.normalized,
-    });
+    if (isEditMode && existingSale) {
+      const oldUnpaid = (existingSale.totalAmount || 0) - (existingSale.paidAmount || 0);
+      const newUnpaid = totalBill - received;
+      const balanceDiff = newUnpaid - oldUnpaid;
 
-    if (!res.success) {
-      setErrorMessage(res.error || 'Failed to confirm sale.');
-      setIsSubmitting(false);
-      return;
+      updateDispatch(existingSale.id, {
+        date,
+        blockType,
+        quantity: reqQty,
+        unitPrice: rate,
+        discount: disc,
+        totalAmount: totalBill,
+        paidAmount: received,
+        paymentMode,
+        paymentStatus: received >= totalBill ? 'PAID' : received > 0 ? 'PARTIAL' : 'UNPAID',
+        vehicleNumber: vehicleValidation.normalized,
+        notes: notes.trim(),
+      });
+
+      if (balanceDiff !== 0) {
+        const currentCustBal =
+          typeof customer.currentBalance === 'number' && !isNaN(customer.currentBalance)
+            ? customer.currentBalance
+            : Number(customer.openingBalance) || 0;
+        updateCustomer(customer.id, {
+          currentBalance: currentCustBal + balanceDiff,
+        });
+      }
+
+      router.push(`/customers/${customer.id}`);
+    } else {
+      const res = addDispatch({
+        customerId: customer.id,
+        date,
+        blockType,
+        quantity: reqQty,
+        unitPrice: rate,
+        discount: disc,
+        amountReceived: received,
+        paymentMode,
+        vehicleNumber: vehicleValidation.normalized,
+        notes: notes.trim(),
+      });
+
+      if (!res.success) {
+        setErrorMessage(res.error || 'Failed to confirm sale.');
+        setIsSubmitting(false);
+        return;
+      }
+
+      router.push(`/customers/${customer.id}`);
     }
-
-    // Redirect to customer profile page
-    router.push(`/customers/${customer.id}`);
   };
 
   return (
@@ -181,7 +325,7 @@ export default function AddSalePage({
         </Link>
 
         <h1 className="text-base font-bold tracking-tight text-white text-center">
-          New Sale
+          {isEditMode ? 'Edit Sale' : 'Add Sale'}
         </h1>
 
         <div className="w-9" />
@@ -197,42 +341,23 @@ export default function AddSalePage({
             </span>
           </div>
 
-          {/* Compact Stock Availability Panel */}
-          <div className="rounded-2xl bg-white p-3 border border-amber-200/80 shadow-2xs space-y-1.5 mb-4">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-[#1a2b3c] flex items-center space-x-1.5">
-                <Package size={14} className="text-[#d97706]" />
-                <span>{BLOCK_CONFIGS[blockType].name}</span>
-              </span>
-              <span
-                className={`rounded-md px-2 py-0.5 text-[10px] font-bold ${
-                  readyStock > 0 ? 'bg-emerald-100 text-[#059669]' : 'bg-red-50 text-red-600'
-                }`}
-              >
-                {readyStock.toLocaleString('en-IN')} Cured / Good
-              </span>
-            </div>
-            <div className="flex items-center justify-between text-[11px] text-gray-500 pt-0.5">
-              <span>
-                Total Yard Stock:{' '}
-                <strong className="text-gray-800">
-                  {availableTotalStock.toLocaleString('en-IN')}
-                </strong>
-              </span>
-              <span>
-                In Curing:{' '}
-                <strong className="text-[#d97706]">
-                  {curingLocked.toLocaleString('en-IN')}
-                </strong>
-              </span>
-            </div>
-          </div>
-
           <form onSubmit={handleSubmit} className="space-y-3.5">
             {errorMessage && (
               <div className="rounded-2xl bg-red-100 border border-red-200 p-3 text-xs font-semibold text-red-800 flex items-start space-x-2">
                 <AlertCircle size={16} className="text-red-600 shrink-0 mt-0.5" />
                 <span>{errorMessage}</span>
+              </div>
+            )}
+
+            {reqQty > effectiveReadyStock && reqQty <= maxAvailableStock && (
+              <div
+                id="warning-exceeds-ready-stock"
+                className="rounded-2xl bg-amber-50 border border-amber-200 p-3 text-xs font-semibold text-amber-800 flex items-start space-x-2"
+              >
+                <AlertCircle size={16} className="text-[#d97706] shrink-0 mt-0.5" />
+                <span>
+                  Warning: Sale quantity ({reqQty.toLocaleString('en-IN')}) exceeds available Good stock ({readyStock.toLocaleString('en-IN')} cured). Bricks will be dispatched from in-curing batches ({curingLocked.toLocaleString('en-IN')} in curing).
+                </span>
               </div>
             )}
 
@@ -303,7 +428,7 @@ export default function AddSalePage({
                     }}
                     placeholder="e.g. 500"
                     required
-                    className="w-full bg-transparent text-sm font-bold text-[#111827] focus:outline-none"
+                    className="no-spinner w-full bg-transparent text-sm font-bold text-[#111827] focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                   />
                 </div>
               </div>
@@ -323,8 +448,9 @@ export default function AddSalePage({
                       setUnitPrice(e.target.value);
                       setErrorMessage(null);
                     }}
+                    placeholder={`e.g. ${BLOCK_CONFIGS[blockType].defaultUnitPrice}`}
                     required
-                    className="w-full bg-transparent text-sm font-bold text-[#111827] focus:outline-none"
+                    className="no-spinner w-full bg-transparent text-sm font-bold text-[#111827] focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none placeholder-gray-400"
                   />
                 </div>
               </div>
@@ -343,9 +469,10 @@ export default function AddSalePage({
                     min="0"
                     step="1"
                     value={amountReceived}
-                    onChange={(e) => setAmountReceived(e.target.value)}
+                    onChange={(e) => handleAmountReceivedChange(e.target.value)}
                     placeholder="0"
-                    className="w-full bg-transparent text-sm font-bold text-[#059669] focus:outline-none placeholder-gray-400"
+                    style={{ MozAppearance: 'textfield' }}
+                    className="no-spinner w-full bg-transparent text-sm font-bold text-[#059669] focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none placeholder-gray-400"
                   />
                 </div>
               </div>
@@ -363,7 +490,8 @@ export default function AddSalePage({
                     value={discount}
                     onChange={(e) => setDiscount(e.target.value)}
                     placeholder="0"
-                    className="w-full bg-transparent text-sm font-bold text-[#d97706] focus:outline-none placeholder-gray-400"
+                    style={{ MozAppearance: 'textfield' }}
+                    className="no-spinner w-full bg-transparent text-sm font-bold text-[#d97706] focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none placeholder-gray-400"
                   />
                 </div>
               </div>
@@ -374,18 +502,17 @@ export default function AddSalePage({
               <label className="block text-xs font-semibold text-gray-700 mb-1">
                 Payment Mode
               </label>
-              <div className="relative rounded-2xl bg-white border border-gray-300 shadow-xs h-12 flex items-center px-3.5">
-                <select
-                  id="select-payment-mode"
-                  value={paymentMode}
-                  onChange={(e) => setPaymentMode(e.target.value as PaymentMode)}
-                  className="w-full h-full bg-transparent text-xs font-semibold text-[#111827] focus:outline-none cursor-pointer"
-                >
-                  <option value="CASH">Cash Payment</option>
-                  <option value="UPI">UPI (Google Pay / PhonePe / Paytm)</option>
-                  <option value="BANK">Bank Transfer / Cheque</option>
-                </select>
-              </div>
+              <CustomSelect<PaymentMode>
+                id="select-payment-mode"
+                value={paymentMode}
+                onChange={handlePaymentModeChange}
+                options={PAYMENT_MODE_OPTIONS}
+                placeholder="Select Payment Mode"
+                heightClass="h-12"
+                textSizeClass="text-xs font-semibold"
+                paddingClass="px-3.5"
+                ariaLabel="Select Payment Mode"
+              />
             </div>
 
             {/* Field 6: Vehicle Number (Mandatory) */}
@@ -424,6 +551,23 @@ export default function AddSalePage({
               </div>
             </div>
 
+            {/* Field 7: Notes (Optional) */}
+            <div>
+              <label className="block text-xs font-semibold text-gray-700 mb-1">
+                Notes
+              </label>
+              <div className="rounded-2xl bg-white border border-gray-300 shadow-xs h-12 flex items-center px-3.5">
+                <input
+                  type="text"
+                  id="input-sale-notes"
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  placeholder="e.g. Site delivery notes"
+                  className="w-full bg-transparent text-xs font-medium text-[#111827] focus:outline-none placeholder-gray-400"
+                />
+              </div>
+            </div>
+
             {/* Highlighted Bill Summary Panel */}
             <div className="rounded-2xl bg-white/95 p-4 border border-amber-200/90 shadow-xs space-y-2">
               <div className="flex items-center justify-between text-xs text-gray-600">
@@ -448,21 +592,51 @@ export default function AddSalePage({
               </div>
             </div>
 
-            {/* Full-width Amber Confirm Sale Button */}
+            {/* Full-width Amber Primary Action Button */}
             <div className="pt-1">
               <button
                 type="submit"
-                id="btn-confirm-sale"
+                id={isEditMode ? 'btn-update-sale' : 'btn-confirm-sale'}
                 disabled={isSubmitting}
-                className="w-full rounded-2xl bg-[#d97706] py-3.5 text-sm font-bold text-white shadow-xl hover:bg-[#b45309] active:scale-95 disabled:opacity-70 transition-all flex items-center justify-center space-x-2"
+                className="w-full rounded-2xl bg-[#d97706] py-3.5 text-sm font-bold text-white shadow-xl hover:bg-[#b45309] active:scale-95 disabled:opacity-70 transition-all flex items-center justify-center space-x-2 cursor-pointer"
               >
                 <CheckCircle2 size={18} />
-                <span>{isSubmitting ? 'Confirming...' : 'Confirm Sale'}</span>
+                <span>
+                  {isSubmitting
+                    ? isEditMode
+                      ? 'Updating...'
+                      : 'Confirming...'
+                    : isEditMode
+                    ? 'Update Sale'
+                    : 'Confirm Sale'}
+                </span>
               </button>
             </div>
           </form>
         </div>
       </div>
     </div>
+  );
+}
+
+export default function AddSalePage({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
+  const resolvedParams = use(params);
+
+  return (
+    <Suspense
+      fallback={
+        <div className="flex flex-col min-h-full bg-[#f3f4f6]">
+          <div className="flex h-14 items-center px-4 bg-[#213547] text-white">
+            <span className="font-bold text-sm">Loading...</span>
+          </div>
+        </div>
+      }
+    >
+      <AddSaleContent customerId={resolvedParams.id} />
+    </Suspense>
   );
 }

@@ -91,7 +91,7 @@ export interface DispatchRecord {
   createdAt: string;
 }
 
-export type PaymentMode = 'CASH' | 'UPI' | 'BANK';
+export type PaymentMode = 'CASH' | 'UPI' | 'BANK' | 'CREDIT';
 
 export interface PaymentRecord {
   id: string;

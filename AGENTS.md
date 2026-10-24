@@ -64,6 +64,13 @@ This document establishes the mandatory operational rules, coding standards, arc
   1. **Dashboard**
   2. **Production**
   3. **Customers**
+- **Customer Details Action Button Layout**:
+  - Row 1 (Grid 2-col): **Call Customer** (`bg-[#213547]`) | **Generate Bill** (white card `border-gray-300` with `FileText` icon)
+  - Row 2: Full-width **Add Sale** button (`bg-[#d97706]`, `rounded-2xl`, links directly to add-sale)
+  - No redundant bottom Add Sale or standalone Weekly Bill PDF buttons.
+- **Sale Editing & Creation Form Reuse**:
+  - Clicking the edit/pencil icon on a sales card must open the exact same Add Sale form component (`/customers/[id]/add-sale?editSaleId=[id]`) in edit mode rather than a separate modal.
+  - In edit mode, the form pre-populates existing sale data (date, quantity, rate, discount, vehicle number, notes), displays "Edit Sale" as header, and displays "Update Sale" on the primary action button. In create mode, the header displays "Add Sale" and the button displays "Confirm Sale".
 
 ---
 

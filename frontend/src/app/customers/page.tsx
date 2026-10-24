@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import Link from 'next/link';
-import { Search, UserPlus } from 'lucide-react';
+import { Search, UserPlus, X } from 'lucide-react';
 import Header from '@/components/layout/Header';
 import CustomerCard from '@/components/customers/CustomerCard';
 import CustomerModal, { CustomerFormData } from '@/components/customers/CustomerModal';

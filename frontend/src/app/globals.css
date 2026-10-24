@@ -54,3 +54,17 @@ body {
   -ms-overflow-style: none;
   scrollbar-width: none;
 }
+
+/* Hide number input spinner controls across all browsers */
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button,
+.no-spinner::-webkit-inner-spin-button,
+.no-spinner::-webkit-outer-spin-button {
+  -webkit-appearance: none !important;
+  margin: 0 !important;
+}
+input[type="number"],
+.no-spinner {
+  -moz-appearance: textfield !important;
+  appearance: textfield !important;
+}
