@@ -67,6 +67,19 @@ export function parseCustomerPhone(rawPhone: string): { countryCode: string; nat
 }
 
 /**
+ * Formats the required digit count description based on min and max length rules.
+ */
+export function getRequiredDigitsText(minLength: number, maxLength: number): string {
+  if (minLength === maxLength) {
+    return `${minLength} digits`;
+  }
+  if (maxLength === minLength + 1) {
+    return `${minLength} or ${maxLength} digits`;
+  }
+  return `${minLength} to ${maxLength} digits`;
+}
+
+/**
  * Validates national phone digits according to the selected country's rules.
  */
 export function validatePhoneNumber(
@@ -80,73 +93,17 @@ export function validatePhoneNumber(
 
   const country = COUNTRY_CONFIGS.find((c) => c.code === countryCode) || {
     code: countryCode,
-    name: 'Selected country',
+    name: '',
     flag: '',
     minLength: 7,
     maxLength: 15,
     placeholder: '',
   };
 
-  // Specific country rules
-  if (country.code === '+91') {
-    if (digits.length !== 10) {
-      return {
-        isValid: false,
-        errorMessage: 'Indian phone number must be exactly 10 digits.',
-      };
-    }
-    return { isValid: true };
-  }
-
-  if (country.code === '+1') {
-    if (digits.length !== 10) {
-      return {
-        isValid: false,
-        errorMessage: 'US/Canada phone number must be exactly 10 digits.',
-      };
-    }
-    return { isValid: true };
-  }
-
-  if (country.code === '+971') {
-    if (digits.length !== 9) {
-      return {
-        isValid: false,
-        errorMessage: 'UAE phone number must be exactly 9 digits (e.g. 501234567).',
-      };
-    }
-    return { isValid: true };
-  }
-
-  if (country.code === '+61') {
-    if (digits.length !== 9) {
-      return {
-        isValid: false,
-        errorMessage: 'Australian phone number must be exactly 9 digits (e.g. 412345678).',
-      };
-    }
-    return { isValid: true };
-  }
-
-  if (country.code === '+44') {
-    if (digits.length < 9 || digits.length > 10) {
-      return {
-        isValid: false,
-        errorMessage: 'UK phone number must be 9 or 10 digits.',
-      };
-    }
-    return { isValid: true };
-  }
-
-  // General length check for other countries
   if (digits.length < country.minLength || digits.length > country.maxLength) {
-    const rangeText =
-      country.minLength === country.maxLength
-        ? `exactly ${country.minLength} digits`
-        : `between ${country.minLength} and ${country.maxLength} digits`;
     return {
       isValid: false,
-      errorMessage: `Phone number for ${country.name} must be ${rangeText}.`,
+      errorMessage: `Phone number must be ${getRequiredDigitsText(country.minLength, country.maxLength)}.`,
     };
   }
 
@@ -202,6 +159,17 @@ export default function CustomerModal({
 
   const activeCountry =
     COUNTRY_CONFIGS.find((c) => c.code === countryCode) || COUNTRY_CONFIGS[0];
+
+  const handleCountryCodeChange = (newCode: string) => {
+    setCountryCode(newCode);
+    const cleanPhone = phone.trim();
+    if (cleanPhone) {
+      const validation = validatePhoneNumber(newCode, cleanPhone);
+      setFormError(validation.isValid ? null : validation.errorMessage || null);
+    } else {
+      setFormError(null);
+    }
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -294,10 +262,7 @@ export default function CustomerModal({
                 <select
                   id="select-country-code"
                   value={countryCode}
-                  onChange={(e) => {
-                    setCountryCode(e.target.value);
-                    setFormError(null);
-                  }}
+                  onChange={(e) => handleCountryCodeChange(e.target.value)}
                   className="w-full rounded-xl border border-gray-300 bg-white px-2.5 py-2 text-xs font-semibold text-[#111827] focus:border-[#d97706] focus:outline-none cursor-pointer appearance-none pr-6 h-full"
                 >
                   {COUNTRY_CONFIGS.map((item) => (

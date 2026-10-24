@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, use } from 'react';
+import React, { useState, use, useMemo } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
@@ -15,6 +15,7 @@ import {
   PlusCircle,
   Box,
   Calendar,
+  CalendarSearch,
   CreditCard,
   Truck,
   Clock,
@@ -59,7 +60,7 @@ function formatBlockTypeDisplay(blockType: string): string {
   return conf ? conf.nominalSize : blockType.replace('inch', ' inch');
 }
 
-type MainTab = 'SALES' | 'BALANCE';
+type MainTab = 'SALES' | 'PAYMENTS';
 type LedgerFilter = 'ALL' | 'DISPATCHES' | 'PAYMENTS';
 
 export default function CustomerProfilePage({
@@ -75,9 +76,9 @@ export default function CustomerProfilePage({
     addPayment,
     user,
     dispatches,
+    payments,
     updateCustomer,
     deleteCustomer,
-    updateDispatch,
   } = useBrickBook();
 
   const customer = getCustomerById(resolvedParams.id);
@@ -86,6 +87,14 @@ export default function CustomerProfilePage({
   const [activeTab, setActiveTab] = useState<MainTab>('SALES');
   const [ledgerFilter, setLedgerFilter] = useState<LedgerFilter>('ALL');
 
+  // Date filter state for Sales and Payments tabs
+  const [salesDate, setSalesDate] = useState<string>('');
+  const [paymentsDate, setPaymentsDate] = useState<string>('');
+  const [dateFilterModal, setDateFilterModal] = useState<'SALES' | 'PAYMENTS' | null>(null);
+  const [tempSalesDate, setTempSalesDate] = useState<string>('');
+  const [tempPaymentsDate, setTempPaymentsDate] = useState<string>('');
+  const [isFilterDatePickerOpen, setIsFilterDatePickerOpen] = useState(false);
+
   // Edit Customer Modal State
   const [isEditCustomerOpen, setIsEditCustomerOpen] = useState(false);
 
@@ -93,25 +102,14 @@ export default function CustomerProfilePage({
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
   const [payAmount, setPayAmount] = useState<number | string>('');
   const [payDate, setPayDate] = useState<string>(getTodayDateString());
-  const [payMode, setPayMode] = useState<PaymentMode>('CASH');
+  const [payMode, setPayMode] = useState<'CASH' | 'UPI' | 'BANK'>('CASH');
   const [refNumber, setRefNumber] = useState('');
   const [bankName, setBankName] = useState('');
   const [chequeNumber, setChequeNumber] = useState('');
   const [payNotes, setPayNotes] = useState('');
   const [payError, setPayError] = useState<string | null>(null);
 
-  // Edit Sale Modal State
-  const [editingSale, setEditingSale] = useState<DispatchRecord | null>(null);
-  const [editSaleDate, setEditSaleDate] = useState('');
-  const [editSaleQty, setEditSaleQty] = useState<number | string>('');
-  const [editSalePrice, setEditSalePrice] = useState<number | string>('');
-  const [editSaleDiscount, setEditSaleDiscount] = useState<number | string>('');
-  const [editSaleVehicle, setEditSaleVehicle] = useState('');
-  const [editSaleNotes, setEditSaleNotes] = useState('');
-  const [editSaleError, setEditSaleError] = useState<string | null>(null);
-
   // Date Picker Modals State
-  const [isEditSaleDateOpen, setIsEditSaleDateOpen] = useState(false);
   const [isPayDateOpen, setIsPayDateOpen] = useState(false);
 
   // Generate Statement / Bill Modal State
@@ -127,6 +125,198 @@ export default function CustomerProfilePage({
   const [billToDate, setBillToDate] = useState<string>(getTodayDateString());
   const [isBillFromDateOpen, setIsBillFromDateOpen] = useState(false);
   const [isBillToDateOpen, setIsBillToDateOpen] = useState(false);
+
+  const customerDispatches = customer ? dispatches.filter((d) => d.customerId === customer.id) : [];
+  const ledger = customer ? getCustomerLedger(customer.id) : [];
+
+  const filteredLedger = ledger.filter((entry) => {
+    if (ledgerFilter === 'DISPATCHES') return entry.type === 'DISPATCH';
+    if (ledgerFilter === 'PAYMENTS') return entry.type === 'PAYMENT';
+    return true;
+  });
+
+  // 1. Total Billed: Opening balance + sum of all sales orders (totalAmount after discount)
+  const openingBalance = customer ? Number(customer.openingBalance) || 0 : 0;
+  const salesBilled = customerDispatches.reduce((sum, d) => sum + (d.totalAmount || 0), 0);
+  const totalBilled = openingBalance + salesBilled;
+
+  // 2. Unified Payments: Initial advances + recorded payments, each counted strictly once
+  const rawCustomerPayments = customer ? payments.filter((p) => p.customerId === customer.id) : [];
+
+  interface UnifiedPayment {
+    id: string;
+    date: string;
+    amount: number;
+    paymentMode: PaymentMode;
+    referenceNumber?: string;
+    bankName?: string;
+    chequeNumber?: string;
+    notes?: string;
+    createdAt?: string;
+    isAdvance?: boolean;
+    saleDetails?: string;
+  }
+
+  const unifiedPayments: UnifiedPayment[] = [];
+  const matchedPaymentIds = new Set<string>();
+
+  // Process sales dispatches with initial advance payments
+  customerDispatches.forEach((d) => {
+    const adv = Number(d.paidAmount) || 0;
+    if (adv > 0) {
+      // Find matching payment in rawCustomerPayments
+      const match = rawCustomerPayments.find((p) => {
+        if (matchedPaymentIds.has(p.id)) return false;
+        const isSaleNote = !p.notes || p.notes.toLowerCase().includes('sale');
+        return isSaleNote && p.date === d.date && Number(p.amount) === adv;
+      });
+
+      const blockLabel = formatBlockTypeDisplay(d.blockType);
+      const saleDesc = `${blockLabel} (${d.quantity.toLocaleString('en-IN')} bricks)`;
+
+      if (match) {
+        matchedPaymentIds.add(match.id);
+        unifiedPayments.push({
+          id: match.id,
+          date: match.date,
+          amount: match.amount,
+          paymentMode: match.paymentMode,
+          referenceNumber: match.referenceNumber,
+          bankName: match.bankName,
+          chequeNumber: match.chequeNumber,
+          notes: match.notes,
+          createdAt: match.createdAt,
+          isAdvance: true,
+          saleDetails: saleDesc,
+        });
+      } else {
+        unifiedPayments.push({
+          id: `adv_${d.id}`,
+          date: d.date,
+          amount: adv,
+          paymentMode: d.paymentMode || 'CASH',
+          notes: `Advance for ${saleDesc}`,
+          createdAt: d.createdAt,
+          isAdvance: true,
+          saleDetails: saleDesc,
+        });
+      }
+    }
+  });
+
+  // Add all other recorded payments not tied to a dispatch advance
+  rawCustomerPayments.forEach((p) => {
+    if (!matchedPaymentIds.has(p.id)) {
+      unifiedPayments.push({
+        id: p.id,
+        date: p.date,
+        amount: p.amount,
+        paymentMode: p.paymentMode,
+        referenceNumber: p.referenceNumber,
+        bankName: p.bankName,
+        chequeNumber: p.chequeNumber,
+        notes: p.notes,
+        createdAt: p.createdAt,
+        isAdvance: p.notes?.toLowerCase().includes('sale') ?? false,
+      });
+    }
+  });
+
+  // Sort unified payments with most recent payments first
+  unifiedPayments.sort((a, b) => {
+    const dCmp = b.date.localeCompare(a.date);
+    if (dCmp !== 0) return dCmp;
+    return (b.createdAt || '').localeCompare(a.createdAt || '');
+  });
+
+  // 3. Outstanding Balance = Total Billed - Total Paid
+  const totalPaid = unifiedPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+  const outstandingBalance = Math.max(0, totalBilled - totalPaid);
+  const isSettled = outstandingBalance === 0;
+
+  // Filtered sales records (all by default, filtered only when date is applied)
+  const filteredSales = useMemo(() => {
+    return customerDispatches.filter((sale) => {
+      if (salesDate) {
+        const sDate = (sale.date || '').split('T')[0];
+        if (sDate !== salesDate) return false;
+      }
+      return true;
+    });
+  }, [customerDispatches, salesDate]);
+
+  // Filtered payment records (all by default, filtered only when date is applied)
+  const filteredPayments = useMemo(() => {
+    return unifiedPayments.filter((pay) => {
+      if (paymentsDate) {
+        const pDate = (pay.date || '').split('T')[0];
+        if (pDate !== paymentsDate) return false;
+      }
+      return true;
+    });
+  }, [unifiedPayments, paymentsDate]);
+
+  // Memoized billing calculation for the statement modal (previous balance carry-forward)
+  const billingSummary = useMemo(() => {
+    // 1. Prior records before billFromDate
+    const prevDispatches = billFromDate
+      ? customerDispatches.filter((d) => d.date < billFromDate)
+      : [];
+    const prevSalesAmount = prevDispatches.reduce(
+      (sum, d) => sum + (Number(d.totalAmount) || 0),
+      0
+    );
+
+    const prevPaymentsList = billFromDate
+      ? unifiedPayments.filter((p) => p.date < billFromDate)
+      : [];
+    const prevPaidAmount = prevPaymentsList.reduce(
+      (sum, p) => sum + (Number(p.amount) || 0),
+      0
+    );
+
+    const initialOpening = customer ? Number(customer.openingBalance) || 0 : 0;
+    const previousBalance = Math.max(
+      0,
+      initialOpening + prevSalesAmount - prevPaidAmount
+    );
+
+    // 2. Current period purchases (within date range)
+    const currentDispatches = customerDispatches.filter((d) => {
+      if (billFromDate && d.date < billFromDate) return false;
+      if (billToDate && d.date > billToDate) return false;
+      return true;
+    });
+    const currentPurchases = currentDispatches.reduce(
+      (sum, d) => sum + (Number(d.totalAmount) || 0),
+      0
+    );
+
+    // 3. Total Amount Due = Previous Outstanding Balance + Current Purchases
+    const totalAmountDue = previousBalance + currentPurchases;
+
+    // 4. Current period payments received
+    const currentPayments = unifiedPayments.filter((p) => {
+      if (billFromDate && p.date < billFromDate) return false;
+      if (billToDate && p.date > billToDate) return false;
+      return true;
+    });
+    const paymentReceived = currentPayments.reduce(
+      (sum, p) => sum + (Number(p.amount) || 0),
+      0
+    );
+
+    // 5. Remaining Outstanding Balance = Total Amount Due - Payment Received
+    const remainingBalance = Math.max(0, totalAmountDue - paymentReceived);
+
+    return {
+      previousBalance,
+      currentPurchases,
+      totalAmountDue,
+      paymentReceived,
+      remainingBalance,
+    };
+  }, [customer, customerDispatches, unifiedPayments, billFromDate, billToDate]);
 
   if (!customer) {
     return (
@@ -149,21 +339,6 @@ export default function CustomerProfilePage({
       </div>
     );
   }
-
-  const customerDispatches = dispatches.filter((d) => d.customerId === customer.id);
-  const ledger = getCustomerLedger(customer.id);
-
-  const filteredLedger = ledger.filter((entry) => {
-    if (ledgerFilter === 'DISPATCHES') return entry.type === 'DISPATCH';
-    if (ledgerFilter === 'PAYMENTS') return entry.type === 'PAYMENT';
-    return true;
-  });
-
-  const customerBalance =
-    typeof customer.currentBalance === 'number' && !isNaN(customer.currentBalance)
-      ? customer.currentBalance
-      : Number(customer.openingBalance) || 0;
-  const isSettled = customerBalance === 0;
 
   // Initial Avatar character
   const initialChar = customer.name.trim() ? customer.name.trim().charAt(0).toUpperCase() : 'C';
@@ -202,68 +377,31 @@ export default function CustomerProfilePage({
   };
 
   const handleGeneratePDFFromModal = () => {
+    const targetDispatches = customerDispatches.filter((d) => {
+      if (billFromDate && d.date < billFromDate) return false;
+      if (billToDate && d.date > billToDate) return false;
+      return true;
+    });
+    const targetPayments = unifiedPayments.filter((p) => {
+      if (billFromDate && p.date < billFromDate) return false;
+      if (billToDate && p.date > billToDate) return false;
+      return true;
+    });
     const filteredLedger = ledger.filter((entry) => {
       if (billFromDate && entry.date < billFromDate) return false;
       if (billToDate && entry.date > billToDate) return false;
       return true;
     });
-    generateCustomerStatementPDF(customer, filteredLedger, user);
+    generateCustomerStatementPDF(
+      customer,
+      filteredLedger,
+      user,
+      targetDispatches,
+      targetPayments,
+      { fromDate: billFromDate, toDate: billToDate },
+      billingSummary
+    );
     setIsBillModalOpen(false);
-  };
-
-  // Open Edit Sale Modal
-  const handleOpenEditSale = (sale: DispatchRecord) => {
-    setEditingSale(sale);
-    setEditSaleDate(sale.date);
-    setEditSaleQty(sale.quantity);
-    setEditSalePrice(sale.unitPrice);
-    setEditSaleDiscount(sale.discount || 0);
-    setEditSaleVehicle(sale.vehicleNumber || '');
-    setEditSaleNotes(sale.notes || '');
-    setEditSaleError(null);
-  };
-
-  // Save Edit Sale
-  const handleSaveSale = (e: React.FormEvent) => {
-    e.preventDefault();
-    setEditSaleError(null);
-    if (!editingSale) return;
-
-    const todayStr = getTodayDateString();
-    if (editSaleDate > todayStr) {
-      setEditSaleError('Sale date cannot be in the future. Please select today or a past date.');
-      return;
-    }
-
-    if (!editSaleVehicle.trim()) {
-      setEditSaleError('Vehicle number is required. Please enter a valid Kerala vehicle registration number.');
-      return;
-    }
-
-    const vehicleValidation = validateKeralaVehicleNumber(editSaleVehicle);
-    if (!vehicleValidation.isValid) {
-      setEditSaleError(
-        vehicleValidation.errorMessage || 'Invalid Kerala vehicle registration number (e.g. KL-07-AB-1234).'
-      );
-      return;
-    }
-
-    const qty = Number(editSaleQty) || 0;
-    const price = Number(editSalePrice) || 0;
-    const disc = Number(editSaleDiscount) || 0;
-    const sub = qty * price;
-    const total = Math.max(0, sub - disc);
-
-    updateDispatch(editingSale.id, {
-      date: editSaleDate,
-      quantity: qty,
-      unitPrice: price,
-      discount: disc,
-      totalAmount: total,
-      vehicleNumber: vehicleValidation.normalized,
-      notes: editSaleNotes.trim(),
-    });
-    setEditingSale(null);
   };
 
   // Submit Payment
@@ -318,15 +456,27 @@ export default function CustomerProfilePage({
           {customer.name}
         </h1>
 
-        <button
-          onClick={handleDeleteCustomer}
-          id="btn-delete-customer"
-          className="flex h-9 w-9 items-center justify-center rounded-full text-[#f87171] hover:text-red-300 hover:bg-red-500/20 active:scale-95 transition-all cursor-pointer"
-          aria-label="Delete Customer"
-          title="Delete Customer Account"
-        >
-          <Trash2 size={20} />
-        </button>
+        <div className="flex items-center space-x-1">
+          <button
+            onClick={handleOpenEditCustomer}
+            id="btn-edit-customer"
+            className="flex h-9 w-9 items-center justify-center rounded-full text-white/90 hover:text-white hover:bg-white/10 active:scale-95 transition-all cursor-pointer"
+            aria-label="Edit Customer"
+            title="Edit Customer"
+          >
+            <Pencil size={18} />
+          </button>
+
+          <button
+            onClick={handleDeleteCustomer}
+            id="btn-delete-customer"
+            className="flex h-9 w-9 items-center justify-center rounded-full text-[#f87171] hover:text-red-300 hover:bg-red-500/20 active:scale-95 transition-all cursor-pointer"
+            aria-label="Delete Customer"
+            title="Delete Customer Account"
+          >
+            <Trash2 size={19} />
+          </button>
+        </div>
       </header>
 
       <div className="px-4 pt-4 pb-12 space-y-4">
@@ -354,7 +504,7 @@ export default function CustomerProfilePage({
             <span>{customer.place || 'Aba'}</span>
           </div>
 
-          {/* Action Buttons: Call Customer & Edit Details */}
+          {/* Action Buttons: Call Customer & Generate Bill */}
           <div className="mt-4 grid grid-cols-2 gap-3 w-full">
             <a
               href={`tel:${customer.phone}`}
@@ -366,81 +516,124 @@ export default function CustomerProfilePage({
             </a>
 
             <button
-              onClick={handleOpenEditCustomer}
-              id="btn-edit-customer"
+              onClick={handleDownloadPDF}
+              id="btn-generate-bill"
               type="button"
               className="flex items-center justify-center gap-2 rounded-2xl bg-white border border-gray-300/80 py-3 text-xs font-bold text-[#1a2b3c] shadow-xs hover:bg-gray-50 active:scale-[0.98] transition-all cursor-pointer"
             >
-              <Pencil size={14} className="text-gray-700" />
-              <span>Edit Details</span>
+              <FileText size={14} className="text-gray-700" />
+              <span>Generate Bill</span>
             </button>
           </div>
 
-          {/* Full-width Amber Button: Generate Weekly Bill (PDF) */}
-          <button
-            onClick={handleDownloadPDF}
-            id="btn-generate-weekly-bill"
-            type="button"
+          {/* Full-width Amber Button: Add Sale */}
+          <Link
+            href={`/customers/${customer.id}/add-sale`}
+            id="btn-add-sale"
             className="mt-3 flex w-full items-center justify-center gap-2 rounded-2xl bg-[#d97706] py-3.5 text-xs font-bold text-white shadow-md hover:bg-[#b45309] active:scale-[0.98] transition-all cursor-pointer"
           >
-            <FileText size={16} className="text-white" />
-            <span>Generate Weekly Bill (PDF)</span>
-          </button>
+            <PlusCircle size={16} className="text-white" />
+            <span>Add Sale</span>
+          </Link>
         </div>
 
-        {/* 3. Rounded Tab Switcher matching Reference Screenshot */}
+        {/* 3. Rounded 2-Tab Switcher: Sales | Payments */}
         <div className="flex rounded-2xl bg-[#eaedf1] p-1 border border-slate-200/60">
           <button
             type="button"
             id="tab-sales-history"
             onClick={() => setActiveTab('SALES')}
-            className={`flex-1 rounded-xl py-2.5 text-xs font-bold transition-all cursor-pointer ${
+            className={`flex-1 rounded-xl py-2 text-[11px] font-bold transition-all cursor-pointer text-center px-1 truncate ${
               activeTab === 'SALES'
                 ? 'bg-[#213547] text-white shadow-xs'
                 : 'text-gray-600 hover:text-gray-900'
             }`}
           >
-            Sales History ({customerDispatches.length})
+            Sales
           </button>
           <button
             type="button"
-            id="tab-balance-history"
-            onClick={() => setActiveTab('BALANCE')}
-            className={`flex-1 rounded-xl py-2.5 text-xs font-bold transition-all cursor-pointer ${
-              activeTab === 'BALANCE'
+            id="tab-payments-history"
+            onClick={() => setActiveTab('PAYMENTS')}
+            className={`flex-1 rounded-xl py-2 text-[11px] font-bold transition-all cursor-pointer text-center px-1 truncate ${
+              activeTab === 'PAYMENTS'
                 ? 'bg-[#213547] text-white shadow-xs'
                 : 'text-gray-600 hover:text-gray-900'
             }`}
           >
-            Balance History
+            Payments
           </button>
         </div>
 
         {/* 4. Tab 1: Sales History Content */}
         {activeTab === 'SALES' && (
           <div className="space-y-3">
-            {/* Sales Orders Heading & Count */}
+            {/* Sales Orders Heading & Date Filter Icon */}
             <div className="flex items-center justify-between px-1">
               <h3 className="text-sm font-bold text-[#111827]">Sales Orders</h3>
-              <span className="rounded-full bg-[#fef3c7] px-2.5 py-0.5 text-[11px] font-bold text-[#b45309]">
-                {customerDispatches.length} Entries
-              </span>
+              <button
+                type="button"
+                id="btn-filter-sales-date"
+                onClick={() => {
+                  setTempSalesDate(salesDate);
+                  setDateFilterModal('SALES');
+                }}
+                className={`flex h-8 w-8 items-center justify-center rounded-xl border transition-all cursor-pointer ${
+                  salesDate
+                    ? 'bg-[#d97706] text-white border-[#d97706] shadow-xs'
+                    : 'bg-white text-gray-500 border-gray-200 hover:text-gray-900 hover:border-gray-300 shadow-2xs'
+                }`}
+                title="Filter sales by date"
+                aria-label="Filter sales by date"
+              >
+                <CalendarSearch size={15} />
+              </button>
             </div>
 
+            {/* Active Date Filter Banner for Sales */}
+            {salesDate && (
+              <div className="flex items-center justify-between rounded-xl bg-amber-50 px-3 py-1.5 border border-amber-200 text-[11px] text-[#b45309]">
+                <span className="font-semibold truncate">
+                  Filtered: {formatFriendlyDate(salesDate)}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setSalesDate('')}
+                  className="ml-2 font-bold hover:underline shrink-0 cursor-pointer"
+                >
+                  Clear
+                </button>
+              </div>
+            )}
+
             {/* Sales List or Empty State */}
-            {customerDispatches.length === 0 ? (
+            {filteredSales.length === 0 ? (
               <div className="rounded-3xl bg-white p-8 text-center border border-slate-100 shadow-xs">
                 <Truck size={32} className="mx-auto text-gray-400 mb-2" />
-                <p className="text-sm font-bold text-gray-700">No Sales Orders Yet</p>
-                <p className="text-xs text-gray-400 mt-1 max-w-[240px] mx-auto">
-                  Click the &quot;Add Sale&quot; button below to record deliveries for {customer.name}.
+                <p className="text-sm font-bold text-gray-700">
+                  {salesDate ? 'No Sales on Selected Date' : 'No Sales Orders Yet'}
                 </p>
+                <p className="text-xs text-gray-400 mt-1 max-w-[240px] mx-auto">
+                  {salesDate
+                    ? 'No sales records match the selected date.'
+                    : `Click "Add Sale" above to record deliveries for ${customer.name}.`}
+                </p>
+                {salesDate && (
+                  <button
+                    type="button"
+                    onClick={() => setSalesDate('')}
+                    className="mt-3 inline-flex items-center gap-1 rounded-xl bg-amber-100 px-3 py-1.5 text-xs font-bold text-[#b45309] hover:bg-amber-200 transition-colors cursor-pointer"
+                  >
+                    Clear Filter
+                  </button>
+                )}
               </div>
             ) : (
               <div className="space-y-3">
-                {customerDispatches.map((sale) => {
+                {filteredSales.map((sale) => {
                   const blockNominal = formatBlockTypeDisplay(sale.blockType);
                   const isPaid = (sale.paidAmount || 0) >= sale.totalAmount && sale.totalAmount > 0;
+                  const isPartial = (sale.paidAmount || 0) > 0 && !isPaid;
 
                   return (
                     <div
@@ -472,15 +665,14 @@ export default function CustomerProfilePage({
                               {formatCustomDate(sale.date)}
                             </p>
                           </div>
-                          <button
-                            type="button"
-                            onClick={() => handleOpenEditSale(sale)}
+                          <Link
+                            href={`/customers/${customer.id}/add-sale?editSaleId=${sale.id}`}
                             className="p-1 text-gray-400 hover:text-gray-700 active:scale-95 transition-all cursor-pointer"
                             aria-label="Edit Sale"
                             title="Edit Sale"
                           >
                             <Pencil size={15} />
-                          </button>
+                          </Link>
                         </div>
                       </div>
 
@@ -494,7 +686,7 @@ export default function CustomerProfilePage({
                         </div>
 
                         <div className="text-center flex flex-col items-center">
-                          <p className="text-[11px] font-medium text-gray-400">Paid</p>
+                          <p className="text-[11px] font-medium text-gray-400">Advance Paid</p>
                           <p className="text-sm font-bold text-gray-800 mt-0.5">
                             ₹{(sale.paidAmount || 0).toLocaleString('en-IN')}
                           </p>
@@ -502,10 +694,12 @@ export default function CustomerProfilePage({
                             className={`mt-1 inline-block rounded-full px-2 py-0.5 text-[10px] font-bold ${
                               isPaid
                                 ? 'bg-emerald-100 text-[#059669]'
-                                : 'bg-[#fef3c7] text-[#b45309]'
+                                : isPartial
+                                ? 'bg-amber-100 text-[#b45309]'
+                                : 'bg-slate-100 text-slate-600'
                             }`}
                           >
-                            {isPaid ? 'Paid' : 'Credit / Bill'}
+                            {isPaid ? 'Paid' : isPartial ? 'Partial Paid' : 'Credit / Bill'}
                           </span>
                         </div>
 
@@ -532,174 +726,159 @@ export default function CustomerProfilePage({
                 })}
               </div>
             )}
-
-            {/* Add Sale Button matching exact Reference Screenshot */}
-            <div className="pt-2">
-              <Link
-                href={`/customers/${customer.id}/add-sale`}
-                id="btn-add-sale"
-                className="flex items-center justify-center gap-2 w-full rounded-2xl bg-[#d97706] py-3.5 text-[15px] font-bold text-white shadow-md hover:bg-[#b45309] active:scale-[0.98] transition-all cursor-pointer"
-              >
-                <PlusCircle size={20} className="text-white" />
-                <span>Add Sale</span>
-              </Link>
-            </div>
           </div>
         )}
 
-        {/* 5. Tab 2: Balance History Content (Financial Summary & Running Ledger) */}
-        {activeTab === 'BALANCE' && (
+        {/* 5. Tab 2: Payment History */}
+        {activeTab === 'PAYMENTS' && (
           <div className="space-y-3">
-            {/* Financial Summary Card */}
-            <div className="rounded-3xl bg-white p-4.5 border border-slate-100 shadow-xs">
-              <div className="flex items-center justify-between">
-                <div>
-                  <span className="text-xs text-gray-500 font-medium">Total Balance Due</span>
-                  <p className="text-xl font-bold text-[#111827] mt-0.5">
-                    ₹ {customerBalance.toLocaleString('en-IN')}
-                  </p>
-                </div>
-                <div className="flex flex-col items-end space-y-2">
-                  <span
-                    className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold ${
-                      isSettled ? 'bg-emerald-100 text-[#059669]' : 'bg-amber-100 text-[#d97706]'
-                    }`}
-                  >
-                    {isSettled ? 'Account Settled' : 'Payment Due'}
-                  </span>
-                  <button
-                    onClick={() => setIsPaymentModalOpen(true)}
-                    id="btn-record-payment"
-                    type="button"
-                    className="flex items-center space-x-1 rounded-xl bg-[#059669] px-3 py-1.5 text-xs font-bold text-white shadow-xs hover:bg-emerald-700 active:scale-95 transition-all"
-                  >
-                    <CreditCard size={14} />
-                    <span>Record Payment</span>
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            {/* Sub-filter: All / Dispatches / Payments */}
+            {/* Total Balance Heading & Action Buttons */}
             <div className="flex items-center justify-between px-1">
-              <h3 className="text-sm font-bold text-[#1a2b3c]">Transaction Ledger</h3>
-              <div className="flex rounded-xl bg-gray-100 p-0.5 text-xs">
-                {(['ALL', 'DISPATCHES', 'PAYMENTS'] as LedgerFilter[]).map((tab) => (
-                  <button
-                    key={tab}
-                    type="button"
-                    onClick={() => setLedgerFilter(tab)}
-                    className={`rounded-lg px-2.5 py-1 font-semibold transition-all ${
-                      ledgerFilter === tab
-                        ? 'bg-[#213547] text-white shadow-2xs'
-                        : 'text-gray-500 hover:text-gray-900'
-                    }`}
-                  >
-                    {tab === 'ALL' ? 'All' : tab === 'DISPATCHES' ? 'Dispatches' : 'Payments'}
-                  </button>
-                ))}
+              <div>
+                <h3 className="text-sm font-bold text-[#111827]">Total Balance</h3>
+                <p className="text-sm font-bold text-[#111827] mt-0.5">
+                  ₹ {outstandingBalance.toLocaleString('en-IN')}
+                </p>
+              </div>
+              <div className="flex items-center space-x-2">
+                <button
+                  type="button"
+                  id="btn-filter-payments-date"
+                  onClick={() => {
+                    setTempPaymentsDate(paymentsDate);
+                    setDateFilterModal('PAYMENTS');
+                  }}
+                  className={`flex h-8 w-8 items-center justify-center rounded-xl border transition-all cursor-pointer ${
+                    paymentsDate
+                      ? 'bg-[#059669] text-white border-[#059669] shadow-xs'
+                      : 'bg-white text-gray-500 border-gray-200 hover:text-gray-900 hover:border-gray-300 shadow-2xs'
+                  }`}
+                  title="Filter payments by date"
+                  aria-label="Filter payments by date"
+                >
+                  <CalendarSearch size={15} />
+                </button>
+                <button
+                  onClick={() => setIsPaymentModalOpen(true)}
+                  type="button"
+                  id="btn-add-payment-tab"
+                  className="flex items-center space-x-1 rounded-xl bg-[#059669] px-2.5 py-1.5 text-[11px] font-bold text-white shadow-xs hover:bg-emerald-700 active:scale-95 transition-all cursor-pointer"
+                >
+                  <Plus size={13} />
+                  <span>Add</span>
+                </button>
               </div>
             </div>
 
-            {/* Ledger List */}
-            {filteredLedger.length === 0 ? (
-              <div className="rounded-3xl bg-white p-7 text-center border border-slate-100 shadow-xs">
-                <Clock size={28} className="mx-auto text-gray-400 mb-2" />
-                <p className="text-xs font-semibold text-gray-700">
-                  {ledgerFilter === 'DISPATCHES'
-                    ? 'No Dispatches Recorded'
-                    : ledgerFilter === 'PAYMENTS'
-                    ? 'No Payments Recorded'
-                    : 'No Transactions Recorded'}
-                </p>
-                <p className="text-[11px] text-gray-400 mt-1">
-                  Transactions will appear here as dispatches and payments are added.
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {filteredLedger.map((entry) => {
-                  const isDispatch = entry.type === 'DISPATCH';
-                  const isPayment = entry.type === 'PAYMENT';
-
-                  return (
-                    <div
-                      key={entry.id}
-                      className="rounded-2xl bg-white p-3.5 border border-slate-100 shadow-xs flex items-start justify-between"
-                    >
-                      <div className="flex items-start space-x-2.5 min-w-0 flex-1 pr-2">
-                        <div
-                          className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-xl ${
-                            isDispatch
-                              ? 'bg-amber-100 text-[#d97706]'
-                              : isPayment
-                              ? 'bg-emerald-100 text-[#059669]'
-                              : 'bg-gray-100 text-gray-600'
-                          }`}
-                        >
-                          {isDispatch ? (
-                            <ArrowUpRight size={15} />
-                          ) : isPayment ? (
-                            <ArrowDownLeft size={15} />
-                          ) : (
-                            <Clock size={14} />
-                          )}
-                        </div>
-
-                        <div className="min-w-0 flex-1">
-                          <p className="text-xs font-bold text-[#111827] truncate">
-                            {entry.description}
-                          </p>
-                          <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[10px] text-gray-500">
-                            <span>{formatFriendlyDate(entry.date)}</span>
-                            {entry.vehicleNumber && (
-                              <span className="rounded bg-gray-100 px-1.5 py-0.2 font-mono font-bold text-[#213547]">
-                                {entry.vehicleNumber}
-                              </span>
-                            )}
-                            {entry.mode && <PaymentModeBadge mode={entry.mode} />}
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="text-right shrink-0">
-                        <p
-                          className={`text-xs font-bold ${
-                            isDispatch
-                              ? 'text-[#111827]'
-                              : isPayment
-                              ? 'text-[#059669]'
-                              : 'text-gray-700'
-                          }`}
-                        >
-                          {isDispatch
-                            ? `+₹ ${(entry.debit || 0).toLocaleString('en-IN')}`
-                            : isPayment
-                            ? `-₹ ${(entry.credit || 0).toLocaleString('en-IN')}`
-                            : `₹ ${(entry.balance || 0).toLocaleString('en-IN')}`}
-                        </p>
-                        <p className="text-[10px] text-gray-400 mt-0.5">
-                          Bal: ₹ {(entry.balance || 0).toLocaleString('en-IN')}
-                        </p>
-                      </div>
-                    </div>
-                  );
-                })}
+            {/* Active Date Filter Banner for Payments */}
+            {paymentsDate && (
+              <div className="flex items-center justify-between rounded-xl bg-emerald-50 px-3 py-1.5 border border-emerald-200 text-[11px] text-[#059669]">
+                <span className="font-semibold truncate">
+                  Filtered: {formatFriendlyDate(paymentsDate)}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setPaymentsDate('')}
+                  className="ml-2 font-bold hover:underline shrink-0 cursor-pointer"
+                >
+                  Clear
+                </button>
               </div>
             )}
-            {/* Add Sale Button on Balance Tab */}
-            <div className="pt-2">
-              <Link
-                href={`/customers/${customer.id}/add-sale`}
-                id="btn-add-sale-balance"
-                className="flex items-center justify-center gap-2 w-full rounded-2xl bg-[#d97706] py-3.5 text-[15px] font-bold text-white shadow-md hover:bg-[#b45309] active:scale-[0.98] transition-all cursor-pointer"
-              >
-                <PlusCircle size={20} className="text-white" />
-                <span>Add Sale</span>
-              </Link>
-            </div>
+
+            {/* Empty state or Payments list */}
+            {filteredPayments.length === 0 ? (
+              <div className="rounded-3xl bg-white p-8 text-center border border-slate-100 shadow-xs">
+                <CreditCard size={32} className="mx-auto text-gray-400 mb-2" />
+                <p className="text-sm font-bold text-gray-700">
+                  {paymentsDate ? 'No Payments on Selected Date' : 'No payments recorded yet.'}
+                </p>
+                <p className="text-xs text-gray-400 mt-1 max-w-[240px] mx-auto">
+                  {paymentsDate
+                    ? 'No payment records match the selected date.'
+                    : 'Payments received as initial advances with sales or via "Add Payment" will appear here.'}
+                </p>
+                {paymentsDate && (
+                  <button
+                    type="button"
+                    onClick={() => setPaymentsDate('')}
+                    className="mt-3 inline-flex items-center gap-1 rounded-xl bg-emerald-100 px-3 py-1.5 text-xs font-bold text-[#059669] hover:bg-emerald-200 transition-colors cursor-pointer"
+                  >
+                    Clear Filter
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {filteredPayments.map((pay) => (
+                  <div
+                    key={pay.id}
+                    className="rounded-[22px] bg-white p-4 border border-gray-200/80 shadow-xs space-y-2.5 hover:border-slate-300 transition-all"
+                  >
+                    <div className="flex items-start justify-between">
+                      <div className="flex items-center space-x-3">
+                        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-emerald-50 text-[#059669]">
+                          <ArrowDownLeft size={20} />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <h4 className="text-[14px] font-bold text-[#111827] leading-tight">
+                              {pay.isAdvance ? 'Advance Payment' : 'Payment Received'}
+                            </h4>
+                            <PaymentModeBadge mode={pay.paymentMode} />
+                          </div>
+                          <p className="text-xs text-gray-400 font-medium mt-0.5">
+                            {formatFriendlyDate(pay.date)}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="text-right">
+                        <p className="text-base font-bold text-[#059669] leading-tight">
+                          ₹{pay.amount.toLocaleString('en-IN')}
+                        </p>
+                        <span className="text-[10px] text-gray-400 font-medium">Received</span>
+                      </div>
+                    </div>
+
+                    {(pay.saleDetails || pay.referenceNumber || pay.bankName || pay.chequeNumber || (pay.notes && pay.notes !== 'Received with sale')) && (
+                      <div className="rounded-xl bg-[#f8fafc] p-2.5 px-3 border border-slate-100 text-xs text-gray-600 space-y-1">
+                        {pay.saleDetails && (
+                          <div className="flex items-center gap-1.5 text-gray-700 font-medium">
+                            <span className="text-gray-400 text-[11px]">Sale:</span>
+                            <span>{pay.saleDetails}</span>
+                          </div>
+                        )}
+                        {pay.referenceNumber && (
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-gray-400 text-[11px]">Ref / UTR:</span>
+                            <span className="font-mono font-bold text-gray-800">{pay.referenceNumber}</span>
+                          </div>
+                        )}
+                        {pay.bankName && (
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-gray-400 text-[11px]">Bank:</span>
+                            <span className="font-semibold text-gray-800">{pay.bankName}</span>
+                            {pay.chequeNumber && (
+                              <span className="text-gray-500 font-mono font-medium">(Chq: {pay.chequeNumber})</span>
+                            )}
+                          </div>
+                        )}
+                        {pay.notes && pay.notes !== 'Received with sale' && (
+                          <div className="flex items-center gap-1.5 text-gray-500 text-[11px]">
+                            <span className="text-gray-400">Note:</span>
+                            <span>{pay.notes}</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
+
       </div>
 
       {/* Modal: Edit Customer Details */}
@@ -709,155 +888,6 @@ export default function CustomerProfilePage({
         onClose={() => setIsEditCustomerOpen(false)}
         onSubmit={handleUpdateCustomer}
       />
-
-      {/* Modal: Edit Sale Details */}
-      {editingSale && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-xs">
-          <div className="w-full max-w-[360px] overflow-hidden rounded-3xl bg-white shadow-2xl">
-            <div className="flex items-center justify-between bg-[#213547] px-5 py-4 text-white">
-              <div className="flex items-center space-x-2">
-                <Pencil size={18} className="text-[#fcd34d]" />
-                <h3 className="font-semibold text-sm">Edit Sale Order</h3>
-              </div>
-              <button
-                onClick={() => setEditingSale(null)}
-                className="rounded-full p-1 text-white/80 hover:bg-white/10"
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            <form onSubmit={handleSaveSale} className="p-5 space-y-3">
-              {editSaleError && (
-                <div className="rounded-xl bg-red-50 border border-red-200 p-2.5 text-xs font-semibold text-red-700 flex items-start space-x-2">
-                  <AlertCircle size={16} className="text-red-600 shrink-0 mt-0.5" />
-                  <span>{editSaleError}</span>
-                </div>
-              )}
-
-              <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1">
-                  Sale Date
-                </label>
-                <div
-                  onClick={() => setIsEditSaleDateOpen(true)}
-                  id="btn-edit-sale-date"
-                  className="w-full flex items-center justify-between rounded-xl border border-gray-300 bg-white px-3 py-2 text-xs text-[#111827] hover:border-[#d97706] transition-colors cursor-pointer"
-                >
-                  <span className="font-semibold text-gray-900">
-                    {editSaleDate ? formatFriendlyDate(editSaleDate) : 'Select date'}
-                  </span>
-                  <Calendar size={16} className="text-[#d97706]" />
-                </div>
-                <DatePickerModal
-                  isOpen={isEditSaleDateOpen}
-                  value={editSaleDate}
-                  title="Select sale date"
-                  maxDate={getTodayDateString()}
-                  onChange={(val) => {
-                    setEditSaleDate(val);
-                    setEditSaleError(null);
-                  }}
-                  onClose={() => setIsEditSaleDateOpen(false)}
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="block text-xs font-semibold text-gray-700 mb-1">
-                    Quantity
-                  </label>
-                  <input
-                    type="number"
-                    value={editSaleQty}
-                    onChange={(e) => setEditSaleQty(e.target.value)}
-                    required
-                    className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-xs font-bold text-[#111827] focus:border-[#d97706] focus:outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-gray-700 mb-1">
-                    Rate / Brick (₹)
-                  </label>
-                  <input
-                    type="number"
-                    step="0.5"
-                    value={editSalePrice}
-                    onChange={(e) => setEditSalePrice(e.target.value)}
-                    required
-                    className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-xs font-bold text-[#111827] focus:border-[#d97706] focus:outline-none"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="block text-xs font-semibold text-gray-700 mb-1">
-                    Discount (₹)
-                  </label>
-                  <input
-                    type="number"
-                    value={editSaleDiscount}
-                    onChange={(e) => setEditSaleDiscount(e.target.value)}
-                    className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-xs text-[#111827] focus:border-[#d97706] focus:outline-none"
-                  />
-                </div>
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="block text-xs font-semibold text-gray-700">
-                      Vehicle Number *
-                    </label>
-                    {editSaleVehicle.trim() && (
-                      validateKeralaVehicleNumber(editSaleVehicle).isValid ? (
-                        <span className="rounded bg-emerald-100 px-1.5 py-0.2 text-[9px] font-bold text-[#059669]">
-                          Valid MVD
-                        </span>
-                      ) : (
-                        <span className="rounded bg-red-100 px-1.5 py-0.2 text-[9px] font-bold text-red-600">
-                          Invalid MVD
-                        </span>
-                      )
-                    )}
-                  </div>
-                  <input
-                    type="text"
-                    value={editSaleVehicle}
-                    onChange={(e) => {
-                      const formatted = formatKeralaPlateAsYouType(e.target.value);
-                      setEditSaleVehicle(formatted);
-                      setEditSaleError(null);
-                    }}
-                    placeholder="KL-07-A-1234"
-                    required
-                    className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-xs uppercase font-mono text-[#111827] focus:border-[#d97706] focus:outline-none placeholder-gray-400"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1">
-                  Notes
-                </label>
-                <input
-                  type="text"
-                  value={editSaleNotes}
-                  onChange={(e) => setEditSaleNotes(e.target.value)}
-                  className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-xs text-[#111827] focus:border-[#d97706] focus:outline-none"
-                />
-              </div>
-
-              <div className="pt-2">
-                <button
-                  type="submit"
-                  className="w-full rounded-2xl bg-[#d97706] py-3 text-xs font-bold text-white shadow-md hover:bg-[#b45309] active:scale-[0.99]"
-                >
-                  Save Sale Order
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
 
       {/* Modal: Record Payment */}
       {isPaymentModalOpen && (
@@ -928,7 +958,7 @@ export default function CustomerProfilePage({
                   Payment Channel
                 </label>
                 <div className="grid grid-cols-3 gap-2">
-                  {(['CASH', 'UPI', 'BANK'] as PaymentMode[]).map((mode) => (
+                  {(['CASH', 'UPI', 'BANK'] as const).map((mode) => (
                     <button
                       key={mode}
                       type="button"
@@ -948,50 +978,6 @@ export default function CustomerProfilePage({
                   ))}
                 </div>
               </div>
-
-              {payMode === 'UPI' && (
-                <div>
-                  <label className="block text-xs font-semibold text-gray-700 mb-1">
-                    UPI Reference / UTR Number
-                  </label>
-                  <input
-                    type="text"
-                    value={refNumber}
-                    onChange={(e) => setRefNumber(e.target.value)}
-                    placeholder="e.g. UPI/428901928301"
-                    className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-xs text-[#111827] focus:border-indigo-500 focus:outline-none"
-                  />
-                </div>
-              )}
-
-              {payMode === 'BANK' && (
-                <div className="space-y-2">
-                  <div>
-                    <label className="block text-xs font-semibold text-gray-700 mb-1">
-                      Bank Name
-                    </label>
-                    <input
-                      type="text"
-                      value={bankName}
-                      onChange={(e) => setBankName(e.target.value)}
-                      placeholder="e.g. State Bank of India, Federal Bank"
-                      className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-xs text-[#111827] focus:border-purple-500 focus:outline-none"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-gray-700 mb-1">
-                      Cheque / NEFT Reference (Optional)
-                    </label>
-                    <input
-                      type="text"
-                      value={chequeNumber}
-                      onChange={(e) => setChequeNumber(e.target.value)}
-                      placeholder="e.g. CHQ-882390"
-                      className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-xs text-[#111827] focus:border-purple-500 focus:outline-none"
-                    />
-                  </div>
-                </div>
-              )}
 
               <div>
                 <label className="block text-xs font-semibold text-gray-700 mb-1">
@@ -1140,19 +1126,38 @@ export default function CustomerProfilePage({
                 </div>
               </div>
 
-              {/* Transactions count summary */}
-              <div className="rounded-xl bg-slate-50 border border-slate-200/60 p-3 text-xs text-gray-600 flex items-center justify-between">
-                <span>Matching Entries:</span>
-                <span className="font-bold text-[#111827]">
-                  {
-                    ledger.filter((entry) => {
-                      if (billFromDate && entry.date < billFromDate) return false;
-                      if (billToDate && entry.date > billToDate) return false;
-                      return true;
-                    }).length
-                  }{' '}
-                  transactions
-                </span>
+              {/* Previous Balance Carry-Forward Breakdown */}
+              <div className="rounded-2xl bg-slate-50 border border-slate-200/80 p-3.5 space-y-2 text-xs">
+                <div className="flex items-center justify-between text-gray-600">
+                  <span>Previous Outstanding Balance:</span>
+                  <span className="font-semibold text-gray-900">
+                    ₹ {billingSummary.previousBalance.toLocaleString('en-IN')}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-gray-600">
+                  <span>Current Period Purchases:</span>
+                  <span className="font-semibold text-gray-900">
+                    + ₹ {billingSummary.currentPurchases.toLocaleString('en-IN')}
+                  </span>
+                </div>
+                <div className="border-t border-slate-200 pt-1.5 flex items-center justify-between text-gray-800 font-bold">
+                  <span>Total Amount Due:</span>
+                  <span className="text-[#213547]">
+                    ₹ {billingSummary.totalAmountDue.toLocaleString('en-IN')}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-emerald-700">
+                  <span>Payment Received:</span>
+                  <span className="font-semibold">
+                    - ₹ {billingSummary.paymentReceived.toLocaleString('en-IN')}
+                  </span>
+                </div>
+                <div className="border-t border-slate-200 pt-1.5 flex items-center justify-between font-bold">
+                  <span className="text-[#111827]">Remaining Outstanding Balance:</span>
+                  <span className={billingSummary.remainingBalance > 0 ? 'text-[#d97706]' : 'text-[#059669]'}>
+                    ₹ {billingSummary.remainingBalance.toLocaleString('en-IN')}
+                  </span>
+                </div>
               </div>
 
               {/* Actions */}
@@ -1172,6 +1177,120 @@ export default function CustomerProfilePage({
                 >
                   <FileDown size={15} />
                   <span>Download PDF</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Compact Date Range Filter Modal */}
+      {dateFilterModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-xs">
+          <div className="w-full max-w-[320px] overflow-hidden rounded-3xl bg-white shadow-2xl border border-slate-100 animate-in fade-in zoom-in-95 duration-150">
+            {/* Header */}
+            <div className="flex items-center justify-between bg-[#213547] px-5 py-4 text-white">
+              <div className="flex items-center space-x-2">
+                <CalendarSearch size={18} className="text-[#fcd34d]" />
+                <h3 className="font-semibold text-sm">
+                  {dateFilterModal === 'SALES' ? 'Filter Sales Orders' : 'Filter Payments'}
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setDateFilterModal(null)}
+                className="rounded-full p-1 text-white/80 hover:bg-white/10 transition-colors cursor-pointer"
+                aria-label="Close"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="p-5 space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 mb-1">
+                  Select Date
+                </label>
+                <div
+                  onClick={() => setIsFilterDatePickerOpen(true)}
+                  id="btn-filter-select-date"
+                  className={`w-full flex items-center justify-between rounded-xl border bg-white px-3 py-2.5 text-xs transition-colors cursor-pointer shadow-xs ${
+                    dateFilterModal === 'SALES'
+                      ? 'border-gray-300 hover:border-[#d97706]'
+                      : 'border-gray-300 hover:border-[#059669]'
+                  }`}
+                >
+                  <span
+                    className={
+                      (dateFilterModal === 'SALES' ? tempSalesDate : tempPaymentsDate)
+                        ? 'font-semibold text-[#111827]'
+                        : 'text-gray-400 font-medium'
+                    }
+                  >
+                    {(dateFilterModal === 'SALES' ? tempSalesDate : tempPaymentsDate)
+                      ? formatFriendlyDate(dateFilterModal === 'SALES' ? tempSalesDate : tempPaymentsDate)
+                      : 'Select date'}
+                  </span>
+                  <Calendar
+                    size={16}
+                    className={dateFilterModal === 'SALES' ? 'text-[#d97706]' : 'text-[#059669]'}
+                  />
+                </div>
+
+                <DatePickerModal
+                  isOpen={isFilterDatePickerOpen}
+                  value={
+                    (dateFilterModal === 'SALES' ? tempSalesDate : tempPaymentsDate) || getTodayDateString()
+                  }
+                  title={dateFilterModal === 'SALES' ? 'Select sale date' : 'Select payment date'}
+                  onChange={(val) => {
+                    if (dateFilterModal === 'SALES') {
+                      setTempSalesDate(val);
+                    } else {
+                      setTempPaymentsDate(val);
+                    }
+                  }}
+                  onClose={() => setIsFilterDatePickerOpen(false)}
+                />
+              </div>
+
+              {/* Action Buttons: Clear Filter | Apply */}
+              <div className="grid grid-cols-2 gap-2.5 pt-1">
+                <button
+                  type="button"
+                  id="btn-clear-date-filter"
+                  onClick={() => {
+                    if (dateFilterModal === 'SALES') {
+                      setSalesDate('');
+                      setTempSalesDate('');
+                    } else {
+                      setPaymentsDate('');
+                      setTempPaymentsDate('');
+                    }
+                    setDateFilterModal(null);
+                  }}
+                  className="w-full rounded-xl border border-gray-300 py-2.5 text-xs font-bold text-gray-700 hover:bg-gray-50 active:scale-95 transition-all cursor-pointer"
+                >
+                  Clear Filter
+                </button>
+                <button
+                  type="button"
+                  id="btn-apply-date-filter"
+                  onClick={() => {
+                    if (dateFilterModal === 'SALES') {
+                      setSalesDate(tempSalesDate);
+                    } else {
+                      setPaymentsDate(tempPaymentsDate);
+                    }
+                    setDateFilterModal(null);
+                  }}
+                  className={`w-full rounded-xl py-2.5 text-xs font-bold text-white shadow-md active:scale-95 transition-all cursor-pointer ${
+                    dateFilterModal === 'SALES'
+                      ? 'bg-[#d97706] hover:bg-[#b45309]'
+                      : 'bg-[#059669] hover:bg-emerald-700'
+                  }`}
+                >
+                  Apply
                 </button>
               </div>
             </div>

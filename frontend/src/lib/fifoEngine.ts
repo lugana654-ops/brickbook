@@ -91,16 +91,19 @@ export interface FIFOAllocationResult {
   errorMessage?: string;
   availableReadyStock: number;
   curingStock: number;
+  totalStock: number;
+  exceedsReadyStock: boolean;
 }
 
 /**
  * First-In, First-Out (FIFO) allocation engine for brick dispatches.
  *
  * Rules:
- * 1. Only READY batches (elapsed >= 14 days) are eligible for allocation.
- * 2. Curing stock is strictly locked from customer dispatch.
- * 3. Batches are allocated oldest first (ascending productionDate).
- * 4. Negative inventory is strictly prevented.
+ * 1. Sales are allowed from both Good / Ready stock and In-Curing stock.
+ * 2. Batches are allocated oldest first based on productionDate.
+ * 3. Batches with remainingQuantity > 0 are deducted in FIFO order.
+ * 4. Only block a sale when requestedQuantity exceeds total remaining yard stock for that brick type.
+ * 5. Recalculate Good stock and Curing stock based on each batch's remaining quantity after FIFO allocation.
  */
 export function allocateFIFODispatch(
   allBatches: ProductionRecord[],
@@ -108,56 +111,86 @@ export function allocateFIFODispatch(
   requestedQuantity: number,
   currentDateStr: string = getTodayDateString()
 ): FIFOAllocationResult {
+  const normalized = normalizeProductionRecords(allBatches, currentDateStr);
+
+  // Filter valid batches for the requested block type (exclude future-dated records)
+  const matchingTypeBatches = normalized.filter(
+    (b) => b.blockType === blockType && b.date <= currentDateStr
+  );
+
+  // Pre-allocation stock metrics in yard
+  let initialReadyStock = 0;
+  let initialCuringStock = 0;
+  let initialTotalStock = 0;
+
+  for (const b of matchingTypeBatches) {
+    const rem = Math.max(0, Number(b.remainingQuantity ?? b.netQuantity) || 0);
+    initialTotalStock += rem;
+    if (b.status === 'READY') {
+      initialReadyStock += rem;
+    } else {
+      initialCuringStock += rem;
+    }
+  }
+
   if (requestedQuantity <= 0) {
     return {
       success: false,
       allocations: [],
       updatedBatches: allBatches,
       errorMessage: 'Requested quantity must be greater than zero.',
-      availableReadyStock: 0,
-      curingStock: 0,
+      availableReadyStock: initialReadyStock,
+      curingStock: initialCuringStock,
+      totalStock: initialTotalStock,
+      exceedsReadyStock: false,
     };
   }
 
-  const normalized = normalizeProductionRecords(allBatches, currentDateStr);
-
-  // Separate ready vs curing batches for the requested block type
-  const matchingTypeBatches = normalized.filter((b) => b.blockType === blockType);
-  const readyBatches = matchingTypeBatches
-    .filter((b) => b.status === 'READY' && b.remainingQuantity > 0)
-    .sort((a, b) => {
-      // Sort oldest first
-      const dateCmp = a.date.localeCompare(b.date);
-      if (dateCmp !== 0) return dateCmp;
-      return a.createdAt.localeCompare(b.createdAt);
-    });
-
-  const availableReadyStock = readyBatches.reduce((sum, b) => sum + b.remainingQuantity, 0);
-  const curingStock = matchingTypeBatches
-    .filter((b) => b.status === 'CURING')
-    .reduce((sum, b) => sum + b.remainingQuantity, 0);
-
-  // Stock Validation Guard
-  if (requestedQuantity > availableReadyStock) {
+  // Stock Validation Guard: Block ONLY when requestedQuantity exceeds total remaining yard stock
+  if (requestedQuantity > initialTotalStock) {
     return {
       success: false,
       allocations: [],
       updatedBatches: allBatches,
-      errorMessage: `Insufficient ready stock. Requested: ${requestedQuantity}, Available: ${availableReadyStock} (${curingStock} units currently in 14-day curing).`,
-      availableReadyStock,
-      curingStock,
+      errorMessage: `Insufficient stock. Requested: ${requestedQuantity.toLocaleString('en-IN')}, Available in yard: ${initialTotalStock.toLocaleString('en-IN')} (${initialReadyStock.toLocaleString('en-IN')} cured, ${initialCuringStock.toLocaleString('en-IN')} in curing).`,
+      availableReadyStock: initialReadyStock,
+      curingStock: initialCuringStock,
+      totalStock: initialTotalStock,
+      exceedsReadyStock: requestedQuantity > initialReadyStock,
     };
   }
 
-  // Sequentially allocate from oldest batch to newest
+  // FIFO Allocation:
+  // 1. Deduct Good / Ready (cured) stock first, exhausting Good stock to 0 if needed.
+  // 2. Deduct any remaining needed quantity from the oldest available curing production batch first (FIFO).
+  const eligibleBatches = matchingTypeBatches
+    .filter((b) => (b.remainingQuantity ?? b.netQuantity) > 0)
+    .sort((a, b) => {
+      // Step 1: Deduct Good / Ready bricks first
+      const aIsReady = a.status === 'READY';
+      const bIsReady = b.status === 'READY';
+      if (aIsReady && !bIsReady) return -1;
+      if (!aIsReady && bIsReady) return 1;
+
+      // Step 2: FIFO by oldest production date first
+      const dateCmp = a.date.localeCompare(b.date);
+      if (dateCmp !== 0) return dateCmp;
+      const createdA = a.createdAt || '';
+      const createdB = b.createdAt || '';
+      return createdA.localeCompare(createdB);
+    });
+
   let qtyNeeded = requestedQuantity;
   const allocations: BatchAllocation[] = [];
-  const allocatedBatchMap = new Map<string, number>(); // batchId -> new remainingQuantity
+  const allocatedBatchMap = new Map<string, number>();
 
-  for (const batch of readyBatches) {
+  for (const batch of eligibleBatches) {
     if (qtyNeeded <= 0) break;
 
-    const allocQty = Math.min(batch.remainingQuantity, qtyNeeded);
+    const currentRem = Math.max(0, Number(batch.remainingQuantity ?? batch.netQuantity) || 0);
+    if (currentRem <= 0) continue;
+
+    const allocQty = Math.min(currentRem, qtyNeeded);
     allocations.push({
       batchId: batch.id,
       productionDate: batch.date,
@@ -165,7 +198,7 @@ export function allocateFIFODispatch(
       quantity: allocQty,
     });
 
-    const newRemaining = batch.remainingQuantity - allocQty;
+    const newRemaining = currentRem - allocQty;
     allocatedBatchMap.set(batch.id, newRemaining);
     qtyNeeded -= allocQty;
   }
@@ -181,11 +214,30 @@ export function allocateFIFODispatch(
     return batch;
   });
 
+  // Recalculate Good stock and Curing stock based on each batch's remaining quantity after FIFO allocation
+  let remainingReadyStock = 0;
+  let remainingCuringStock = 0;
+  let remainingTotalStock = 0;
+
+  for (const b of updatedBatches) {
+    if (b.blockType === blockType && b.date <= currentDateStr) {
+      const rem = Math.max(0, Number(b.remainingQuantity ?? b.netQuantity) || 0);
+      remainingTotalStock += rem;
+      if (b.status === 'READY') {
+        remainingReadyStock += rem;
+      } else {
+        remainingCuringStock += rem;
+      }
+    }
+  }
+
   return {
     success: true,
     allocations,
     updatedBatches,
-    availableReadyStock: availableReadyStock - requestedQuantity,
-    curingStock,
+    availableReadyStock: remainingReadyStock,
+    curingStock: remainingCuringStock,
+    totalStock: remainingTotalStock,
+    exceedsReadyStock: requestedQuantity > initialReadyStock,
   };
 }
